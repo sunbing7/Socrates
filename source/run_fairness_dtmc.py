@@ -81,8 +81,14 @@ def main():
 
     y0s = np.array(ast.literal_eval(read(pathY)))
 
-    for i in range(100):
+    for i in range(1):
         assertion['x0'] = pathX + 'data' + str(i) + '.txt'
+
+        #print('Analyzing...')
+
+        solver.solve(model, assertion)
+        print('\n============================\n')
+        '''
         x0 = np.array(ast.literal_eval(read(assertion['x0'])))
 
         output_x0 = model.apply(x0)
@@ -101,7 +107,7 @@ def main():
             print('Skip at data {}'.format(i))
 
         print('\n============================\n')
-
+        '''
 
 if __name__ == '__main__':
     main()

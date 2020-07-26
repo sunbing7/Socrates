@@ -24,7 +24,6 @@ class SPRT():
 class DTMC():
     def __init__(self):
         pass
-
     def solve(self, model, assertion, display=None):
         impl = DTMCImpl()
         impl.solve(model, assertion, display)
