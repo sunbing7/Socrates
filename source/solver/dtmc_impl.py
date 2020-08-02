@@ -11,8 +11,8 @@ class DTMCImpl():
         self.model = None
         self.assertion = None
         self.display = None
-        self.s = []
-        self.s_idx = []
+        self.s = [] #states
+        self.s_idx = [] #index of states
         self.s0 = 0
         self.delta = 0.001
         self.error = 0.01
@@ -22,8 +22,10 @@ class DTMCImpl():
         self.m = 0
         self.offset = []
         self.num_of_path = 0
+        self.gen_path = '../debug/gen_path.txt'   #debug purpose
         self.step = 50  #get_new_sample step
         self.sensitive = []
+        self.under_analyze = []
         self.final = [] #final state
 
 
@@ -52,6 +54,9 @@ class DTMCImpl():
 
         if 'fairness' in spec:
             self.sensitive = np.array(ast.literal_eval(read(spec['fairness'])))
+
+        # analyze sensitive feature only
+        self.under_analyze = self.sensitive
 
         print('Sensitive features: {}'. format(self.sensitive))
         # calculate offset to keep each state identical
@@ -176,7 +181,7 @@ class DTMCImpl():
             y = np.argmax(self.model.apply(x), axis=1)[0]
             path = [self.s0]
             for i in range (0, len(x)):
-                if i in self.sensitive:
+                if i in self.under_analyze:
                     x[i] = x[i] + self.offset[i]
                     path.append(x[i])
 
@@ -197,49 +202,89 @@ class DTMCImpl():
             '''
         return out
 
+
     '''
-    
+    learn dtmc model based on given network
     '''
     def learn_dtmc_model(self):
+        file = open(self.gen_path, 'w+')
         self.init_model()
         while (self.is_more_sample_needed() == True):
             path = self.get_new_sample()
             for i in range (0, self.step):
                 self.update_model(path[i])
+                for item in path[i]:
+                    file.write("%f\t" % item)
+                file.write("\n")
 
         print('Error tolerance: {}'.format(self.error))
         print('Accuracy: {}'.format(self.delta))
         print('Number of traces generated: {} \n'.format(self.num_of_path))
+        file.close()
         return
+
+
 
     def analyze_fairness(self):
         # generate weight matrix
         weight = []
-        for i in range (1, len(self.sensitive) + 2):
+        from_symbol = []
+        to_symbol = []
+        for i in range (1, len(self.under_analyze) + 2):
             w = []
+            _from_symbol = []
+            _to_symbol = []
             for idx_row in range (0, self.m):
                 if self.s_idx[idx_row] == i - 1:
+                    _from_symbol.append(idx_row)
                     w_row = []
                     for j in range (0, self.m):
                         if self.s_idx[j] == i:
                             w_row.append(self.A[idx_row][j])
+                            if j not in _to_symbol:
+                                _to_symbol.append(j)
                     w.append(w_row)
+
             weight.append(w)
+            from_symbol.append(_from_symbol)
+            to_symbol.append(_to_symbol)
 
         # analyze independence fairness
         res = []
-        res.append(weight[len(self.sensitive)])
+        res.append(weight[len(self.under_analyze)])
         print("Probabilities: \n")
-        print('Sensitive feature {}:'.format(self.sensitive[-1]))
-        print(np.matrix(weight[len(self.sensitive)]))
+        print('Sensitive feature {}:'.format(self.under_analyze[-1]))
+
+        # print index
+        print("transition from:")
+        for item in from_symbol[len(self.under_analyze)]:
+            print("%d" % self.s[item])
+        print("transition to:")
+        for item in to_symbol[len(self.under_analyze)]:
+            print("%d" % self.s[item])
+
+        print(np.matrix(weight[len(self.under_analyze)]))
         print("\n")
-        for i in range (0, len(self.sensitive)):
-            result = np.matmul(weight[len(self.sensitive) - i - 1], res[i])
+        for i in range (0, len(self.under_analyze)):
+            result = np.matmul(weight[len(self.under_analyze) - i - 1], res[i])
             res.append(result)
-            if i != len(self.sensitive) - 1:
-                print('Sensitive feature {}:'.format(self.sensitive[len(self.sensitive) - i - 2]))
+            if i != len(self.under_analyze) - 1:
+                print('Sensitive feature {}:'.format(self.under_analyze[len(self.under_analyze) - i - 2]))
+            else:
+                print("Overal probabilities:")
+
+            # print index
+            print("transition from:")
+            for item in from_symbol[len(self.under_analyze) - i - 1]:
+                print("%d" % self.s[item])
+            print("transition to:")
+            for item in to_symbol[len(self.under_analyze)]:
+                print("%d" % self.s[item])
+
             print(np.matrix(result))
             print("\n")
+
+
 
         return res
 
