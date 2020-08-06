@@ -25,6 +25,7 @@ class DTMCImpl():
         self.gen_path = '../debug/gen_path.txt'   #debug purpose
         self.step = 50  #get_new_sample step
         self.sensitive = []
+        self.feature = [] # additional feature to analyze
         self.under_analyze = []
         self.final = [] #final state
 
@@ -55,10 +56,14 @@ class DTMCImpl():
         if 'fairness' in spec:
             self.sensitive = np.array(ast.literal_eval(read(spec['fairness'])))
 
-        # analyze sensitive feature only
-        self.under_analyze = self.sensitive
+        if 'feature' in spec:
+            self.feature = np.array(ast.literal_eval(read(spec['feature'])))
 
+
+        # analyze sensitive feature only
+        self.under_analyze = np.concatenate((self.feature, self.sensitive), 0)
         print('Sensitive features: {}'. format(self.sensitive))
+        print('Other features: {}'.format(self.feature))
         # calculate offset to keep each state identical
         self.calc_offset()
 
@@ -180,10 +185,29 @@ class DTMCImpl():
             x = self.__generate_x(self.model.shape, lower, upper)
             y = np.argmax(self.model.apply(x), axis=1)[0]
             path = [self.s0]
+            '''
             for i in range (0, len(x)):
-                if i in self.under_analyze:
+                if i in self.feature:
                     x[i] = x[i] + self.offset[i]
                     path.append(x[i])
+
+            for i in range (0, len(x)):
+                if i in self.sensitive:
+                    x[i] = x[i] + self.offset[i]
+                    path.append(x[i])
+            '''
+
+            # support only one feature and one sensitive
+            to_add = 0
+            for i in range (0, len(x)):
+                if i in self.feature:
+                    new = (int(x[i]) + 1) << 16
+                    to_add = to_add | new
+                if i in self.sensitive:
+                    new = (int(x[i]) + 1) << 4
+                    to_add = to_add | new
+
+            path.append(to_add)
 
             path.append((y + self.offset[-1]))
             self.num_of_path = self.num_of_path + 1
@@ -230,7 +254,7 @@ class DTMCImpl():
         weight = []
         from_symbol = []
         to_symbol = []
-        for i in range (1, len(self.under_analyze) + 2):
+        for i in range (1, len(self.sensitive) + 2):
             w = []
             _from_symbol = []
             _to_symbol = []
@@ -251,35 +275,38 @@ class DTMCImpl():
 
         # analyze independence fairness
         res = []
-        res.append(weight[len(self.under_analyze)])
+        res.append(weight[len(self.sensitive)])
         print("Probabilities: \n")
-        print('Sensitive feature {}:'.format(self.under_analyze[-1]))
+        print('Sensitive feature {}:'.format(self.sensitive[-1]))
 
         # print index
         print("transition from:")
-        for item in from_symbol[len(self.under_analyze)]:
-            print("%d" % self.s[item])
+        for item in from_symbol[len(self.sensitive)]:
+            print("0x%08X" % int(self.s[item]))
         print("transition to:")
-        for item in to_symbol[len(self.under_analyze)]:
-            print("%d" % self.s[item])
+        for item in to_symbol[len(self.sensitive)]:
+            print("0x%08X" % int(self.s[item]))
 
-        print(np.matrix(weight[len(self.under_analyze)]))
+        #print transformation matrix
+        for item in weight[len(self.sensitive)]:
+            print(item)
+        #print(np.matrix(weight[len(self.sensitive)]))
         print("\n")
-        for i in range (0, len(self.under_analyze)):
-            result = np.matmul(weight[len(self.under_analyze) - i - 1], res[i])
+        for i in range (0, len(self.sensitive)):
+            result = np.matmul(weight[len(self.sensitive) - i - 1], res[i])
             res.append(result)
-            if i != len(self.under_analyze) - 1:
-                print('Sensitive feature {}:'.format(self.under_analyze[len(self.under_analyze) - i - 2]))
+            if i != len(self.sensitive) - 1:
+                print('Sensitive feature {}:'.format(self.sensitive[len(self.sensitive) - i - 2]))
             else:
                 print("Overal probabilities:")
 
             # print index
             print("transition from:")
-            for item in from_symbol[len(self.under_analyze) - i - 1]:
-                print("%d" % self.s[item])
+            for item in from_symbol[len(self.sensitive) - i - 1]:
+                print("0x%08X" % int(self.s[item]))
             print("transition to:")
-            for item in to_symbol[len(self.under_analyze)]:
-                print("%d" % self.s[item])
+            for item in to_symbol[len(self.sensitive)]:
+                print("0x%08X" % int(self.s[item]))
 
             print(np.matrix(result))
             print("\n")
