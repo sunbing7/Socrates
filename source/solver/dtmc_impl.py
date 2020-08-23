@@ -29,10 +29,13 @@ class DTMCImpl():
         self.sensitive = []
         self.feature = [] # additional feature to analyze
         self.intermediate_layer = []    # intermediate layer to analyze
+        self.neurons = []    # neuron index at intermediate layer to analyze
+        self.neuron = []  # current neuron index at intermediate layer analyzing
         self.under_analyze = []
         self.final = [] #final state
         self.timeout = 20   #timeout value set to 20min
         self.starttime = time.time()    #start time
+        self.label_diff = 0
 
     def __generate_x(self, shape, lower, upper):
         size = np.prod(shape)
@@ -47,7 +50,7 @@ class DTMCImpl():
             i = i + 1
         return out
 
-    def solve(self, model, assertion, display=None, delta=0.01, error=0.01, step=50):
+    def solve(self, model, assertion, display=None, delta=0.0001, error=0.001, step=50):
         self.model = model
         self.assertion = assertion
         self.display = display
@@ -66,6 +69,9 @@ class DTMCImpl():
         if 'intermediate' in spec:
             self.intermediate_layer = np.array(ast.literal_eval(read(spec['intermediate'])))
 
+        if 'neurons' in spec:
+            self.neurons = np.array(ast.literal_eval(read(spec['neurons'])))
+
         if 'timeout' in spec:
             self.timeout = read(spec['timeout']) * 60
 
@@ -74,49 +80,58 @@ class DTMCImpl():
         print('Sensitive features: {}'. format(self.sensitive))
         print('Other features: {}'.format(self.feature))
         print('Intermediate layers: {}'.format(self.intermediate_layer))
+        print('Intermediate neuron index: {}'.format(self.neurons))
         print('Timeout: {}'.format(self.timeout))
 
-        # calculate offset to keep each state identical
-        self.calc_offset()
+        #array = self.aequitas_test()
 
-        # calculate bitshift for state coding
-        self.calc_bitshift()
+        if len(self.neurons) != 0:
 
-        #print('Learning DTMC model...')
-        self.learn_dtmc_model()
+            for i in range (0, len(self.neurons)):
+                self.neuron = self.neurons[i]
+                print('\nNeuron: {}'.format(self.neuron))
+                # calculate offset to keep each state identical
+                self.calc_offset()
 
-        # analyze fairness
-        #print('Analyzing fairness...')
-        self.analyze_fairness()
+                # calculate bitshift for state coding
+                self.calc_bitshift()
 
-        '''
-        spec = assertion
-        lower = model.lower
-        upper = model.upper
-        x0 = np.array(ast.literal_eval(read(spec['x0'])))
-        y0 = np.argmax(model.apply(x0), axis=1)[0]
-        if 'fairness' in spec:
-            sensitive = np.array(ast.literal_eval(read(spec['fairness'])))
-            for index in range(x0.size):
-                if not (index in sensitive):
-                    lower[index] = x0[index]
-                    upper[index] = x0[index]
+                #print('Learning DTMC model...')
+                self.learn_dtmc_model()
 
-        x = self.__generate_x(model.shape, lower, upper)
-        y = np.argmax(model.apply(x), axis=1)[0]
-        '''
+                # analyze fairness
+                #print('Analyzing fairness...')
+                self.analyze_fairness()
+
+                self.starttime = time.time()
+        else:
+            # calculate offset to keep each state identical
+            self.calc_offset()
+
+            # calculate bitshift for state coding
+            self.calc_bitshift()
+
+            # print('Learning DTMC model...')
+            self.learn_dtmc_model()
+
+            # analyze fairness
+            # print('Analyzing fairness...')
+            self.analyze_fairness()
+
+
 
     def calc_offset(self):
         lower = self.model.lower
         upper = self.model.upper
 
         size = upper.size
-
+        self.offset = []
         self.offset.append(1)
         for i in range (1, size):
             self.offset.append(self.offset[i - 1] + upper[i - 1] - lower[i - 1] + 1)
 
     def calc_bitshift(self):
+        self.bitshift = []
         total_analyze = len(self.intermediate_layer) + 4 #start + input layer (sensitive + other feature) + output layer
 
         for i in range (0, total_analyze):
@@ -191,15 +206,45 @@ class DTMCImpl():
 
         return
 
+    def add_state(self, state, sequence):
+
+
+        if state not in self.s:
+            self.s.append(state)
+            self.s_idx.append(sequence)
+            self.m = self.m + 1
+            # add corresponding A fields
+            if len(self.A) == 0:
+                self.A.append([0.0])
+            else:
+                for row in self.A:
+                    row.append(0.0)
+                self.A.append([0.0] * len(self.A[0]))
+
+            # add corresponding n_ij fields
+            if len(self.n_ij) == 0:
+                self.n_ij.append([0.0])
+            else:
+                for row in self.n_ij:
+                    row.append(0.0)
+                self.n_ij.append([0.0] * len(self.n_ij[0]))
+
+            # add corresponding n_i fields
+            self.n_i.append(0.0)
+
+        return
+
     '''
     init model
     '''
     def init_model(self):
         self.s = []
+        self.s_idx = []
         self.m = 0
         self.n_ij = []
         self.n_i = []
         self.A = []
+        self.num_of_path = 0
         return
 
     '''
@@ -214,6 +259,8 @@ class DTMCImpl():
                 continue
             max_diff = 0.0
             for j in range (0, self.m):
+                if (self.n_i[i] == 0.0):
+                    continue
                 diff = abs(0.5 - self.n_ij[i][j] / self.n_i[i])
                 if diff > max_diff:
                     max_diff = diff
@@ -228,6 +275,8 @@ class DTMCImpl():
                             continue
                         max_diff = 0.0
                         for p in range(0, self.m):
+                            if self.n_i[k] == 0.0:
+                                continue
                             diff = abs(0.5 - self.n_ij[k][p] / self.n_i[k])
                             if diff > max_diff:
                                 max_diff = diff
@@ -260,6 +309,12 @@ class DTMCImpl():
             y = np.argmax(y, axis=1)[0]
             #y = np.argmax(self.model.apply(x), axis=1)[0]
 
+            #calculate label difference
+            y_ori = np.argmax(self.model.apply(x), axis=1)[0]
+
+            if y != y_ori:
+                self.label_diff = self.label_diff + 1
+
             intermediate_result = []
             for i in range (0, len(layer_op)):
                 if i in self.intermediate_layer:
@@ -267,9 +322,22 @@ class DTMCImpl():
 
                     # code into one state: each neuron represendted by 2 bits
                     # TODO: only support positive and non-positive now
+                    '''
+                    #encode all neurtons in this layer
                     layer_state = 0
                     for j in range (0, len(layer_sign[0])):
                         layer_state = layer_state | (int((layer_sign[0][j] + 1)) << (2 * j))
+                    '''
+                    '''
+                    #count number of activated neuron
+                    ayer_activated = np.count_nonzero(layer_sign)
+                    layer_state = layer_activated
+                    '''
+
+                    #neuron by neuron
+                    layer_state = int(layer_sign[0][self.neuron] + 1)
+                    self.add_state((1 << self.bitshift[3]), 2)
+                    self.add_state((2 << self.bitshift[3]), 2)
 
                     intermediate_result.append((layer_state << self.bitshift[3]))
 
@@ -315,13 +383,21 @@ class DTMCImpl():
                     file.write("%f\t" % item)
                 file.write("\n")
 
+        self.finalize_model()
+
         print('Error tolerance: {}'.format(self.error))
         print('Accuracy: {}'.format(self.delta))
         print('Number of traces generated: {} \n'.format(self.num_of_path))
+        print('Number of states: {}'.format(self.m))
         file.close()
         return
 
-
+    def finalize_model(self):
+        for i in range(0, self.m):
+            if self.n_i[i] == 0.0:
+                for j in range (0, self.m):
+                    self.n_ij[i][j] = 1 / self.m
+        return
 
     def analyze_fairness(self):
         # generate weight matrix
@@ -397,6 +473,11 @@ class DTMCImpl():
             print(item)
 
 
+        print("Total execution time: %fs\n" % (time.time() - self.starttime))
+
+        accuracy_diff = self.label_diff / self.num_of_path
+        print("Total label difference: %f\n" % (accuracy_diff))
+
         print("debug message:")
 
         for i in range (0, len(weight)):
@@ -405,5 +486,54 @@ class DTMCImpl():
                 print(item)
 
         return res
+
+    def aequitas_test(self):
+        num_trials = 400
+        samples = 1000
+
+        estimate_array = []
+        rolling_average = 0.0
+
+        for i in range(num_trials):
+            disc_count = 0
+            total_count = 0
+            for j in range(samples):
+                total_count = total_count + 1
+
+
+                if (self.aeq_test_new_sample()):
+                    disc_count = disc_count + 1
+
+            estimate = float(disc_count) / total_count
+            rolling_average = ((rolling_average * i) + estimate) / (i + 1)
+            estimate_array.append(estimate)
+
+            print(estimate, rolling_average)
+
+        print("Total execution time: %fs\n" % (time.time() - self.starttime))
+        return estimate_array
+
+
+    def aeq_test_new_sample(self):
+        lower = self.model.lower
+        upper = self.model.upper
+
+
+        x = self.__generate_x(self.model.shape, lower, upper)
+        y = np.argmax(self.model.apply(x), axis=1)[0]
+        x_g = x
+
+        sensitive_feature = self.sensitive[0]
+        sens_range = upper[sensitive_feature] - lower[sensitive_feature] + 1
+
+        for val in range (int(lower[sensitive_feature]), int(upper[sensitive_feature]) + 1):
+            if val != x[sensitive_feature]:
+                x_g[sensitive_feature] = float(val)
+                y_g = np.argmax(self.model.apply(x_g), axis=1)[0]
+
+                if y != y_g:
+                    return 1
+        return 0
+
 
 
