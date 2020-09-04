@@ -58,56 +58,54 @@ def main():
     add_solver(args, spec)
 
     model, assertion, solver, display = parse(spec)
-    '''
+
     if args.dataset == 'bank':
-        pathX = 'benchmark/fairness/bank/data/'
-        pathY = 'benchmark/fairness/bank/data/labels.txt'
+        pathX = '../benchmark/fairness/bank/data/'
+        pathY = '../benchmark/fairness/bank/data/labels.txt'
     elif args.dataset == 'census':
-        pathX = 'benchmark/fairness/census/data/'
-        pathY = 'benchmark/fairness/census/data/labels.txt'
+        pathX = '../benchmark/fairness/census/data/'
+        pathY = '../benchmark/fairness/census/data/labels.txt'
     elif args.dataset == 'credit':
-        pathX = 'benchmark/fairness/credit/data/'
-        pathY = 'benchmark/fairness/credit/data/labels.txt'
-    '''
-    if args.dataset == 'bank':
-        pathX = '../benchmark/fairness/bank/data/'  #debug
-        pathY = '../benchmark/fairness/bank/data/labels.txt'   #debug
-    elif args.dataset == 'census':
-        pathX = '../benchmark/fairness/census/data/'   #debug
-        pathY = '../benchmark/fairness/census/data/labels.txt' #debug
-    elif args.dataset == 'credit':
-        pathX = '../benchmark/fairness/credit/data/'   #debug
-        pathY = '../benchmark/fairness/credit/data/labels.txt' #debug
+        pathX = '../benchmark/fairness/credit/data/'
+        pathY = '../benchmark/fairness/credit/data/labels.txt'
 
     y0s = np.array(ast.literal_eval(read(pathY)))
 
-    for i in range(1):
+    assertion['x0'] = pathX + 'data' + str(0) + '.txt'
+
+    solver.solve(model, assertion)
+    print('\n============================\n')
+    '''
+
+    #test accuracy
+    ori_acc = 0
+    fixed_acc = 0
+    for i in range(32000):
         assertion['x0'] = pathX + 'data' + str(i) + '.txt'
-
-        #print('Analyzing...')
-
-        solver.solve(model, assertion)
-        print('\n============================\n')
-        '''
         x0 = np.array(ast.literal_eval(read(assertion['x0'])))
+        x0_ = x0.copy()
+        x0_[4] = 0
+        #x0_[10] = 0
+        #x0_[2] = 0
 
-        output_x0 = model.apply(x0)
-        lbl_x0 = np.argmax(output_x0, axis=1)[0]
 
-        print('Data {}\n'.format(i))
-        print('x0 = {}'.format(x0))
-        print('output_x0 = {}'.format(output_x0))
-        print('lbl_x0 = {}'.format(lbl_x0))
-        print('y0 = {}\n'.format(y0s[i]))
+        y = np.argmax(model.apply(x0), axis=1)[0]
 
-        if lbl_x0 == y0s[i]:
-            print('Run at data {}\n'.format(i))
-            solver.solve(model, assertion)
-        else:
-            print('Skip at data {}'.format(i))
+        #y_, layer_op = model.apply_intermediate(x0)
+        #y_ = np.argmax(y_, axis=1)[0]
+        y_ = np.argmax(model.apply(x0_), axis=1)[0]
 
-        print('\n============================\n')
-        '''
+        if y != y0s[i]:
+            ori_acc = ori_acc + 1
 
+        if y_ != y0s[i]:
+            fixed_acc = fixed_acc + 1
+
+
+    print("Accuracy of ori network: %fs\n" % ((32000 - ori_acc) / 320))
+    print("Accuracy of fxied network: %fs\n" % ((32000 - fixed_acc) / 320))
+
+    print('\n============================\n')
+    '''
 if __name__ == '__main__':
     main()

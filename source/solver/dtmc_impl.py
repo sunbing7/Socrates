@@ -6,6 +6,7 @@ from autograd import grad
 from utils import *
 import time
 
+is_debug = False
 
 class DTMCImpl():
     def __init__(self):
@@ -36,6 +37,7 @@ class DTMCImpl():
         self.timeout = 20   #timeout value set to 20min
         self.starttime = time.time()    #start time
         self.label_diff = 0
+        self.criteria = 0.1
 
     def __generate_x(self, shape, lower, upper):
         size = np.prod(shape)
@@ -50,13 +52,10 @@ class DTMCImpl():
             i = i + 1
         return out
 
-    def solve(self, model, assertion, display=None, delta=0.0001, error=0.001, step=50):
+    def solve(self, model, assertion, display=None):
         self.model = model
         self.assertion = assertion
         self.display = display
-        self.delta = delta
-        self.error = error
-        self.step = step
 
         spec = assertion
 
@@ -75,15 +74,29 @@ class DTMCImpl():
         if 'timeout' in spec:
             self.timeout = read(spec['timeout']) * 60
 
+        if 'criteria' in spec:
+            self.criteria = spec['criteria']
+
+        if 'error' in spec:
+            self.error = (spec['error']) / 2
+
+        if 'confidence' in spec:
+            self.delta = 1 - math.sqrt(1 - (spec['confidence']))
+
         # analyze sensitive feature only
         self.under_analyze = np.concatenate((self.feature, self.sensitive), 0)
         print('Sensitive features: {}'. format(self.sensitive))
         print('Other features: {}'.format(self.feature))
         print('Intermediate layers: {}'.format(self.intermediate_layer))
         print('Intermediate neuron index: {}'.format(self.neurons))
-        print('Timeout: {}'.format(self.timeout))
+        print('Error tolerance: {:.5f}'.format(self.error))
+        print('Accuracy: {:.5f}'.format(self.delta))
+        print('Fairness Criteria: {}'.format(self.criteria))
+        print('Timeout: {}s'.format(self.timeout))
 
         #array = self.aequitas_test()
+
+        #fairness checking:
 
         if len(self.neurons) != 0:
 
@@ -305,12 +318,19 @@ class DTMCImpl():
 
         while generated:
             x = self.__generate_x(self.model.shape, lower, upper)
+
+            #sunbing test
+            x_ori = x.copy()
+            #x[4] = 0
+            #x[10] = 0
+            #x[2] = 0
+
             y, layer_op = self.model.apply_intermediate(x)
             y = np.argmax(y, axis=1)[0]
             #y = np.argmax(self.model.apply(x), axis=1)[0]
 
             #calculate label difference
-            y_ori = np.argmax(self.model.apply(x), axis=1)[0]
+            y_ori = np.argmax(self.model.apply(x_ori), axis=1)[0]
 
             if y != y_ori:
                 self.label_diff = self.label_diff + 1
@@ -385,9 +405,7 @@ class DTMCImpl():
 
         self.finalize_model()
 
-        print('Error tolerance: {}'.format(self.error))
-        print('Accuracy: {}'.format(self.delta))
-        print('Number of traces generated: {} \n'.format(self.num_of_path))
+        print('Number of traces generated: {}'.format(self.num_of_path))
         print('Number of states: {}'.format(self.m))
         file.close()
         return
@@ -426,23 +444,23 @@ class DTMCImpl():
         # analyze independence fairness
         res = []
         res.append(weight[(len(self.sensitive) + len(self.intermediate_layer))])
-        print("Probabilities: \n")
+        self.debug_print("Probabilities: \n")
         #print('Sensitive feature {}:'.format(self.sensitive[-1]))
 
         # print index
-        print("transition from:")
+        self.debug_print("transition from:")
         for item in from_symbol[(len(self.sensitive) + len(self.intermediate_layer))]:
-            print("0x%016X" % int(self.s[item]))
-        print("transition to:")
+            self.debug_print("0x%016X" % int(self.s[item]))
+        self.debug_print("transition to:")
         for item in to_symbol[(len(self.sensitive) + len(self.intermediate_layer))]:
-            print("0x%016X" % int(self.s[item]))
+            self.debug_print("0x%016X" % int(self.s[item]))
 
         #print transformation matrix
-        print("\n")
+        self.debug_print("\n")
         for item in weight[(len(self.sensitive) + len(self.intermediate_layer))]:
-            print(item)
+            self.debug_print(item)
         #print(np.matrix(weight[len(self.sensitive)]))
-        print("\n")
+        self.debug_print("\n")
         for i in range (0, (len(self.sensitive) + len(self.intermediate_layer))):
             result = np.matmul(weight[(len(self.sensitive) + len(self.intermediate_layer)) - i - 1], res[i])
             res.append(result)
@@ -453,37 +471,51 @@ class DTMCImpl():
                 print("Overal probabilities:")
             '''
             # print index
-            print("transition from:")
+            self.debug_print("transition from:")
             for item in from_symbol[(len(self.sensitive) + len(self.intermediate_layer)) - i - 1]:
-                print("0x%016X" % int(self.s[item]))
-            print("transition to:")
+                self.debug_print("0x%016X" % int(self.s[item]))
+            self.debug_print("transition to:")
             for item in to_symbol[(len(self.sensitive) + len(self.intermediate_layer))]:
-                print("0x%016X" % int(self.s[item]))
+                self.debug_print("0x%016X" % int(self.s[item]))
 
-            print("\n")
+            self.debug_print("\n")
             for item in np.matrix(result):
-                print(item)
+                self.debug_print(item)
 
             #print(np.matrix(result))
-            print("\n")
+            self.debug_print("\n")
 
         #print bitshift
-        print("State coding bitshift (0: start, 1: sensitive input feature, 2: other input feature, 3+: intermediate state, last: output):")
+        self.debug_print("State coding bitshift (0: start, 1: sensitive input feature, 2: other input feature, 3+: intermediate state, last: output):")
         for item in self.bitshift:
-            print(item)
+            self.debug_print(item)
 
+        #check against criteria
+        weight_to_check = weight[(len(self.sensitive) + len(self.intermediate_layer))]
+        #TODO: to handle more than 2 labels
+
+        weight_to_check.sort()
+
+        prob_diff = weight_to_check[len(weight_to_check[0])][0] - weight_to_check[0][0]
+
+        if prob_diff > self.criteria:
+            print("Failed accurcay criteria!")
+        else:
+            print("Passed accurcay criteria!")
+
+        print('Probability difference: {:.4f}\n'.format(prob_diff))
 
         print("Total execution time: %fs\n" % (time.time() - self.starttime))
 
         accuracy_diff = self.label_diff / self.num_of_path
-        print("Total label difference: %f\n" % (accuracy_diff))
+        self.debug_print("Total label difference: %f\n" % (accuracy_diff))
 
-        print("debug message:")
+        self.debug_print("Debug message:")
 
         for i in range (0, len(weight)):
-            print("weight: %d" % i)
+            self.debug_print("weight: %d" % i)
             for item in weight[i]:
-                print(item)
+                self.debug_print(item)
 
         return res
 
@@ -534,6 +566,10 @@ class DTMCImpl():
                 if y != y_g:
                     return 1
         return 0
+
+    def debug_print(self, x):
+        if is_debug:
+            print(x)
 
 
 
