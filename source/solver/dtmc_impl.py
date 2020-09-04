@@ -6,8 +6,6 @@ from autograd import grad
 from utils import *
 import time
 
-is_debug = False
-
 class DTMCImpl():
     def __init__(self):
         self.model = None
@@ -38,6 +36,8 @@ class DTMCImpl():
         self.starttime = time.time()    #start time
         self.label_diff = 0
         self.criteria = 0.1
+        self.sens_analysis = False #sensitivity analysis
+        self.dbgmsg = False
 
     def __generate_x(self, shape, lower, upper):
         size = np.prod(shape)
@@ -62,15 +62,6 @@ class DTMCImpl():
         if 'fairness' in spec:
             self.sensitive = np.array(ast.literal_eval(read(spec['fairness'])))
 
-        if 'feature' in spec:
-            self.feature = np.array(ast.literal_eval(read(spec['feature'])))
-
-        if 'intermediate' in spec:
-            self.intermediate_layer = np.array(ast.literal_eval(read(spec['intermediate'])))
-
-        if 'neurons' in spec:
-            self.neurons = np.array(ast.literal_eval(read(spec['neurons'])))
-
         if 'timeout' in spec:
             self.timeout = read(spec['timeout']) * 60
 
@@ -86,9 +77,7 @@ class DTMCImpl():
         # analyze sensitive feature only
         self.under_analyze = np.concatenate((self.feature, self.sensitive), 0)
         print('Sensitive features: {}'. format(self.sensitive))
-        print('Other features: {}'.format(self.feature))
-        print('Intermediate layers: {}'.format(self.intermediate_layer))
-        print('Intermediate neuron index: {}'.format(self.neurons))
+
         print('Error tolerance: {:.5f}'.format(self.error))
         print('Accuracy: {:.5f}'.format(self.delta))
         print('Fairness Criteria: {}'.format(self.criteria))
@@ -97,6 +86,60 @@ class DTMCImpl():
         #array = self.aequitas_test()
 
         #fairness checking:
+        # calculate offset to keep each state identical
+        self.calc_offset()
+
+        # calculate bitshift for state coding
+        self.calc_bitshift()
+
+        # print('Learning DTMC model...')
+        self.learn_dtmc_model()
+
+        # analyze fairness
+        # print('Analyzing fairness...')
+        res, is_fair = self.analyze_fairness()
+
+        if is_fair:
+            return
+
+        self.sens_analysis = True
+
+        # perform sensitivity analysis
+        print("Perform sensitivity analysis:")
+        # other features
+        print('\nOther Feature Analysis:')
+        if 'feature' in spec:
+            self.feature = np.array(ast.literal_eval(read(spec['feature'])))
+
+            print('Other features: {}'.format(self.feature))
+
+            #learn model with other features
+            # print matrix
+
+            # calculate offset to keep each state identical
+            self.calc_offset()
+
+            # calculate bitshift for state coding
+            self.calc_bitshift()
+
+            # print('Learning DTMC model...')
+            self.learn_dtmc_model()
+
+            # analyze fairness
+            self.analyze_fairness()
+
+            self.feature = []
+
+        # other neurons
+        if 'intermediate' in spec:
+            self.intermediate_layer = np.array(ast.literal_eval(read(spec['intermediate'])))
+
+        if 'neurons' in spec:
+            self.neurons = np.array(ast.literal_eval(read(spec['neurons'])))
+
+        print('\nHidden Neuron Analysis:')
+        print('Intermediate layers: {}'.format(self.intermediate_layer))
+        print('Intermediate neuron index: {}'.format(self.neurons))
 
         if len(self.neurons) != 0:
 
@@ -117,20 +160,6 @@ class DTMCImpl():
                 self.analyze_fairness()
 
                 self.starttime = time.time()
-        else:
-            # calculate offset to keep each state identical
-            self.calc_offset()
-
-            # calculate bitshift for state coding
-            self.calc_bitshift()
-
-            # print('Learning DTMC model...')
-            self.learn_dtmc_model()
-
-            # analyze fairness
-            # print('Analyzing fairness...')
-            self.analyze_fairness()
-
 
 
     def calc_offset(self):
@@ -318,22 +347,8 @@ class DTMCImpl():
 
         while generated:
             x = self.__generate_x(self.model.shape, lower, upper)
-
-            #sunbing test
-            x_ori = x.copy()
-            #x[4] = 0
-            #x[10] = 0
-            #x[2] = 0
-
             y, layer_op = self.model.apply_intermediate(x)
             y = np.argmax(y, axis=1)[0]
-            #y = np.argmax(self.model.apply(x), axis=1)[0]
-
-            #calculate label difference
-            y_ori = np.argmax(self.model.apply(x_ori), axis=1)[0]
-
-            if y != y_ori:
-                self.label_diff = self.label_diff + 1
 
             intermediate_result = []
             for i in range (0, len(layer_op)):
@@ -444,23 +459,23 @@ class DTMCImpl():
         # analyze independence fairness
         res = []
         res.append(weight[(len(self.sensitive) + len(self.intermediate_layer))])
-        self.debug_print("Probabilities: \n")
+        self.detail_print("\nProbabilities:")
         #print('Sensitive feature {}:'.format(self.sensitive[-1]))
 
         # print index
-        self.debug_print("transition from:")
+        self.detail_print("transition from:")
         for item in from_symbol[(len(self.sensitive) + len(self.intermediate_layer))]:
-            self.debug_print("0x%016X" % int(self.s[item]))
-        self.debug_print("transition to:")
+            self.detail_print("0x%016X" % int(self.s[item]))
+        self.detail_print("transition to:")
         for item in to_symbol[(len(self.sensitive) + len(self.intermediate_layer))]:
-            self.debug_print("0x%016X" % int(self.s[item]))
+            self.detail_print("0x%016X" % int(self.s[item]))
 
         #print transformation matrix
-        self.debug_print("\n")
+        self.detail_print("\n")
         for item in weight[(len(self.sensitive) + len(self.intermediate_layer))]:
-            self.debug_print(item)
+            self.detail_print(item)
         #print(np.matrix(weight[len(self.sensitive)]))
-        self.debug_print("\n")
+        self.detail_print("\n")
         for i in range (0, (len(self.sensitive) + len(self.intermediate_layer))):
             result = np.matmul(weight[(len(self.sensitive) + len(self.intermediate_layer)) - i - 1], res[i])
             res.append(result)
@@ -471,24 +486,24 @@ class DTMCImpl():
                 print("Overal probabilities:")
             '''
             # print index
-            self.debug_print("transition from:")
+            self.detail_print("transition from:")
             for item in from_symbol[(len(self.sensitive) + len(self.intermediate_layer)) - i - 1]:
-                self.debug_print("0x%016X" % int(self.s[item]))
-            self.debug_print("transition to:")
+                self.detail_print("0x%016X" % int(self.s[item]))
+            self.detail_print("transition to:")
             for item in to_symbol[(len(self.sensitive) + len(self.intermediate_layer))]:
-                self.debug_print("0x%016X" % int(self.s[item]))
+                self.detail_print("0x%016X" % int(self.s[item]))
 
-            self.debug_print("\n")
+            self.detail_print("\n")
             for item in np.matrix(result):
-                self.debug_print(item)
+                self.detail_print(item)
 
             #print(np.matrix(result))
-            self.debug_print("\n")
+            self.detail_print("\n")
 
         #print bitshift
-        self.debug_print("State coding bitshift (0: start, 1: sensitive input feature, 2: other input feature, 3+: intermediate state, last: output):")
+        self.detail_print("State coding bitshift (0: start, 1: sensitive input feature, 2: other input feature, 3+: intermediate state, last: output):")
         for item in self.bitshift:
-            self.debug_print(item)
+            self.detail_print(item)
 
         #check against criteria
         weight_to_check = weight[(len(self.sensitive) + len(self.intermediate_layer))]
@@ -496,19 +511,23 @@ class DTMCImpl():
 
         weight_to_check.sort()
 
-        prob_diff = weight_to_check[len(weight_to_check[0])][0] - weight_to_check[0][0]
+        prob_diff = weight_to_check[len(weight_to_check) - 1][0] - weight_to_check[0][0]
 
-        if prob_diff > self.criteria:
-            print("Failed accurcay criteria!")
-        else:
-            print("Passed accurcay criteria!")
+        fairness_result = 1
+        if self.sens_analysis == False:
+            if prob_diff > self.criteria:
+                fairness_result = 0
+                print("Failed accurcay criteria!")
+            else:
+                fairness_result = 1
+                print("Passed accurcay criteria!")
 
-        print('Probability difference: {:.4f}\n'.format(prob_diff))
+            print('Probability difference: {:.4f}\n'.format(prob_diff))
 
-        print("Total execution time: %fs\n" % (time.time() - self.starttime))
+            print("Total execution time: %fs\n" % (time.time() - self.starttime))
 
-        accuracy_diff = self.label_diff / self.num_of_path
-        self.debug_print("Total label difference: %f\n" % (accuracy_diff))
+        #accuracy_diff = self.label_diff / self.num_of_path
+        #self.debug_print("Total label difference: %f\n" % (accuracy_diff))
 
         self.debug_print("Debug message:")
 
@@ -517,7 +536,7 @@ class DTMCImpl():
             for item in weight[i]:
                 self.debug_print(item)
 
-        return res
+        return res, fairness_result
 
     def aequitas_test(self):
         num_trials = 400
@@ -567,8 +586,12 @@ class DTMCImpl():
                     return 1
         return 0
 
+    def detail_print(self, x):
+        if self.sens_analysis or self.dbgmsg:
+            print(x)
+
     def debug_print(self, x):
-        if is_debug:
+        if self.dbgmsg:
             print(x)
 
 
