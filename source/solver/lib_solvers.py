@@ -1,6 +1,7 @@
 from solver.optimize_impl import OptimizeImpl
 from solver.sprt_impl import SPRTImpl
 from solver.dtmc_impl import DTMCImpl
+from solver.dtmc_rnn import DTMCImpl_rnn
 
 
 class Optimize():
@@ -26,4 +27,11 @@ class DTMC():
         pass
     def solve(self, model, assertion, display=None):
         impl = DTMCImpl()
+        impl.solve(model, assertion, display)
+
+class DTMC_rnn():
+    def __init__(self):
+        pass
+    def solve(self, model, assertion, display=None):
+        impl = DTMCImpl_rnn()
         impl.solve(model, assertion, display)
