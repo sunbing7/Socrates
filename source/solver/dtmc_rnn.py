@@ -7,6 +7,9 @@ from utils import *
 import time
 import ast
 from scipy import spatial
+from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
+import pyswarms as ps
 
 import gensim
 
@@ -49,6 +52,15 @@ class DTMCImpl_rnn():
         self.embedding_index = None #embedding index
         self.nlp_model = None   #embedding model
         self.data_used = 0
+        self.prism_model_path = '../benchmark/rnn_fairness/nnet/jigsaw_lstm/prism_model/model.pm'
+        self.reuse_sample = False
+        self.gen_f = None   # file handler of gen.txt
+        self.gen_f_w = None  # file handler of gen.txt
+        self.generated_samples = 0  #number of samples generated and stored in gen.txt file
+        self.gen_offset = 0 # pos of gen.txt being read
+        self.repair = False
+        self.repair_layer = None
+        self.repair_w = None
 
     def __generate_x(self):
 
@@ -69,6 +81,11 @@ class DTMCImpl_rnn():
         x[50 * index : 50 * (index + 1)] = s_vec
 
         x_w[index] = synonym[index2][0]
+
+        if self.reuse_sample == False:
+            self.gen_f.write(str(x.tolist()) + '\n')
+            self.gen_f_w.write(str(x_w.tolist()) + '\n')
+            self.generated_samples = self.generated_samples + 1
 
         return x, x_w
 
@@ -94,8 +111,28 @@ class DTMCImpl_rnn():
 
         return x0, x0_w
 
+    def __get_x_reuse(self):
+        # select x0 randomly from training data
+        index = self.data_used
+
+        if self.gen_offset >= self.generated_samples:
+            #print('not enough generated samples')
+            return self.__generate_x()
+
+        try:
+            rd_line = self.gen_f.readline()
+            rd_w_line = self.gen_f_w.readline()
+            self.gen_offset = self.gen_offset + 1
+        except:
+            return self.__generate_x()
+
+        x0 = np.array(ast.literal_eval(rd_line))
+        x0_w = np.array(ast.literal_eval(rd_w_line))
+
+        return x0, x0_w
 
     def solve(self, model, assertion, display=None):
+
         self.model = model
         self.assertion = assertion
         self.display = display
@@ -142,6 +179,20 @@ class DTMCImpl_rnn():
         if 'confidence' in spec:
             self.delta = 1 - math.sqrt(1 - (spec['confidence']))
 
+        if 'intermediate' in spec:
+            self.intermediate_layer = np.array(ast.literal_eval(read(spec['intermediate'])))
+
+        #self.reuse_sample = True
+        #self.generated_samples = 36700 - 100
+
+        if self.reuse_sample == False:
+            self.gen_f = open(self.data_path + '/' + 'gen.txt', 'w+')
+            self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'w+')
+        else:
+            self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
+            self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
+
+
         print('Error tolerance: {:.5f}'.format(self.error))
         print('Accuracy: {:.5f}'.format(self.delta))
         print('Fairness Criteria: {}'.format(self.criteria))
@@ -150,9 +201,38 @@ class DTMCImpl_rnn():
         # print('Learning DTMC model...')
         self.learn_dtmc_model()
 
+        self.gen_f.close()
+        self.gen_f_w.close()
+
         # analyze fairness
         # print('Analyzing fairness...')
-        res, is_fair = self.analyze_fairness()
+        res, is_fair, prob_diff = self.analyze_fairness()
+        print('prob diff: {}'.format(prob_diff))
+
+        self.export_prism_model()
+
+        # repair
+        print('Start reparing...')
+        self.repair = True
+        options = {'c1': 0.41, 'c2': 0.41, 'w': 0.8}
+
+        optimizer = ps.single.GlobalBestPSO(n_particles=5, dimensions=1, options=options,
+                                            bounds=([-1.0], [1.0]),
+                                            init_pos=np.array(
+                                                [[0.0],[0.0],[0.0],[0.0],[0.0]]))
+
+        # Perform optimization
+        best_cost, best_pos = optimizer.optimize(self.pso_fitness_func, iters=20)
+
+        # Obtain the cost history
+        print(optimizer.cost_history)
+        # Obtain the position history
+        print(optimizer.pos_history)
+        # Obtain the velocity history
+        #print(optimizer.velocity_history)
+
+        print('best cost: {}'.format(best_cost))
+        print('best pos: {}'.format(best_pos))
 
         if is_fair:
             return
@@ -216,6 +296,39 @@ class DTMCImpl_rnn():
                 self.analyze_fairness()
 
                 self.starttime = time.time()
+
+    def pso_fitness_func(self, weight):
+
+        self.reuse_sample = True
+
+
+        result = []
+        for i in range (0, len(weight)):
+            self.repair_layer = 0
+            self.repair_w = weight[i][0]
+            self.starttime = time.time()
+
+            self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
+            self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
+            self.learn_dtmc_model()
+
+            self.gen_f.close()
+            self.gen_f_w.close()
+            res, is_fair, prob_diff = self.analyze_fairness()
+            result.append(prob_diff)
+        print(result)
+
+        return result
+
+    def pso_fitness_func_test(self, weight):
+        prob_diff = 0.0
+        result = []
+        for i in range(0, len(weight)):
+            result.append(weight[i][0])
+        #print('\n {}'.format(prob_diff))
+
+        return result
+
 
     def calc_offset(self):
         lower = self.model.lower
@@ -319,16 +432,30 @@ class DTMCImpl_rnn():
         self.n_i = []
         self.A = []
         self.num_of_path = 0
+        self.data_used = 0
+        self.num_of_path = 0
+        self.gen_offset = 0
 
-        #initialize states of inputs:
+        # initialize states of inputs:
 
-        #start node
+        # start node
         self.add_state(0, 0)
-        self.add_state(1, 2)
-        self.add_state(2, 2)
+
+        # intermediat layer
+        if len(self.intermediate_layer) != 0:
+            self.add_state(11, 2)
+            self.add_state(12, 2)
+
+            self.add_state(1, 3)
+            self.add_state(2, 3)
+        else:
+            self.add_state(1, 2)
+            self.add_state(2, 2)
+
         self.final.append(1)
         self.final.append(2)
 
+        # input layer
         for i in range(0, self.sens_group + 1):
             self.add_state(i + 3, 1)
 
@@ -393,14 +520,24 @@ class DTMCImpl_rnn():
 
         while generated:
             if self.data_used < self.data_len:
-                x, x_w = self.__get_x()
+                x, x_w = self.__get_x() # x_w: word vector
                 self.data_used = self.data_used + 1
-            else:
+            elif self.reuse_sample == False:
                 x, x_w = self.__generate_x()
+            elif self.reuse_sample == True:
+                x, x_w = self.__get_x_reuse()
 
-            y = self.model.apply(x)
+            #y = self.model.apply(x)
+            #y = np.argmax(y, axis=1)[0]
+
+            # intermediat layer
+
+            if self.repair == False:
+                y, cell = self.model.apply_lstm_inter(x)
+            else:
+                y, cell = self.model.apply_lstm_repair(x, self.repair_layer, self.repair_w)
+            # now cell contain a sequence of hidden cell values of length equal to number of timesteps
             y = np.argmax(y, axis=1)[0]
-
             '''
             intermediate_result = []
             for i in range(0, len(layer_op)):
@@ -427,6 +564,18 @@ class DTMCImpl_rnn():
 
             path.append(to_add)
 
+            # add intermediate
+            if len(self.intermediate_layer) != 0:
+                '''
+                if cell > 0.27:
+                    to_add = 12
+                else:
+                    to_add = 11
+                '''
+                to_add = cell
+                #path.append(to_add)
+                path = path + to_add
+
             path.append(y + 1)
 
             self.num_of_path = self.num_of_path + 1
@@ -438,7 +587,7 @@ class DTMCImpl_rnn():
     '''
     learn dtmc model based on given network
     '''
-
+    '''
     def learn_dtmc_model(self):
         #file = open(self.gen_path, 'w+')
         self.init_model()
@@ -456,6 +605,74 @@ class DTMCImpl_rnn():
         print('Number of states: {}'.format(self.m))
         #file.close()
         return
+    '''
+
+    '''
+    learn dtmc model based on given network; with k measn clustering on hidden neuronß
+    '''
+
+    def learn_dtmc_model(self):
+        #file = open(self.gen_path, 'w+')
+        self.init_model()
+        path_gen = []
+
+        cluster_label = np.array([])
+
+        kmeans = MiniBatchKMeans(n_clusters=2, init='k-means++', batch_size=self.step)
+        #kmeans = KMeans(n_clusters=2, init='k-means++', max_iter=300, n_init=10, random_state=0)
+        if len(self.intermediate_layer) != 0:
+            self.debug_print('Debug: Cluster centers at iterations:')
+
+        while (self.is_more_sample_needed() == True):
+            new_path = self.get_new_sample()
+            # new_path: s0, input, hidden0, hidden1 ... hiddent, output
+            # number of hidden states = len(new_path) - 3
+            num_hidden_state = len(new_path[0]) - 3
+            cluster_label = []
+            if len(self.intermediate_layer) != 0:
+                path_gen = path_gen + new_path
+                new_path_array = np.array(new_path)
+
+                for h in range (0, num_hidden_state):
+                    hidden_state = (new_path_array[:, h + 2]).reshape(-1, 1)
+                    kmeans = kmeans.partial_fit(hidden_state)
+                    cluster_label.append(kmeans.labels_)
+
+                #hidden_state = (new_path_array[:,2]).reshape(-1, 1)
+                #kmeans = kmeans.partial_fit(hidden_state)
+                #cluster_label = kmeans.labels_
+            if len(self.intermediate_layer) != 0:
+                self.debug_print('{}: {}, {}'.format(self.num_of_path, kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
+
+            for i in range(0, self.step):
+                path = new_path[i]
+                if len(self.intermediate_layer) != 0:
+                    for h in range(0, num_hidden_state):
+                        path[2 + h] = cluster_label[h][i] + 11
+                self.update_model(path)
+                # for item in path[i]:
+                #    file.write("%f\t" % item)
+                # file.write("\n")
+
+        #apply kmeans
+        #hidden_states = np.array(path_gen)[:, 2]
+        #kmeans = kmeans.fit(hidden_states.reshape(-1, 1))
+
+        # now we have clusters
+        #cluster_label = kmeans.labels_
+
+        # print cluster center
+        if len(self.intermediate_layer) != 0:
+            if len(self.intermediate_layer) != 0:
+                print('Hidden cell cluster centers: \n{}, {}'.format(kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
+
+        self.finalize_model()
+
+        print('Number of traces generated: {}'.format(self.num_of_path))
+        print('Number of states: {}'.format(self.m))
+        #file.close()
+        return
+
 
     def finalize_model(self):
         for i in range(0, self.m):
@@ -544,7 +761,13 @@ class DTMCImpl_rnn():
 
         weight_to_check.sort()
 
-        prob_diff = weight_to_check[len(weight_to_check) - 1][0] - weight_to_check[0][0]
+        for non_zero_i in range (0, len(weight_to_check)):
+            if weight_to_check[non_zero_i][0] == 0.0:
+                continue
+            else:
+                break
+
+        prob_diff = weight_to_check[len(weight_to_check) - 1][0] - weight_to_check[non_zero_i][0]
 
         fairness_result = 1
         if self.sens_analysis == False:
@@ -570,9 +793,9 @@ class DTMCImpl_rnn():
                 self.debug_print(item)
 
         for i in range (0, len(self.n_i)):
-            self.debug_print('n_{}: {}\n'.format(i, self.n_i[i]))
+            self.debug_print('n_{}: {}'.format(i, self.n_i[i]))
 
-        return res, fairness_result
+        return res, fairness_result, prob_diff
 
     def aequitas_test(self):
         num_trials = 400
@@ -631,3 +854,41 @@ class DTMCImpl_rnn():
         return sorted(embeddings_index.keys(),
                       key=lambda word: spatial.distance.euclidean(embeddings_index[word], word_vec))
 
+
+    def export_prism_model(self):
+        fout = open(self.prism_model_path, 'w')
+
+        fout.write('dtmc\n\n')
+
+        # start module
+        fout.write('module model_learned\n')
+
+        # states
+        to_write = 's:[' + str(min(self.s)) + '..' + str(max(self.s)) + '] init ' + str(min(self.s)) + ';\n'
+        fout.write(to_write)
+
+        # state transitions
+        for i in range (0, len(self.s)):
+            to_write = '[]s=' + str(self.s[i]) + ' -> '
+            first = True
+            is_empty = True
+            for j in range (0, len(self.A[i])):
+                if self.A[i][j] == 0:
+                    continue
+                is_empty = False
+                if first == True:
+                    to_write = to_write + str(self.A[i][j]) + ':(s\'=' + str(self.s[j]) + ')'
+                    first = False
+                else:
+                    to_write = to_write + ' + ' + str(self.A[i][j]) + ':(s\'=' + str(self.s[j]) + ')'
+            to_write = to_write + ';\n'
+            if is_empty == False:
+                fout.write(to_write)
+
+        # end module
+        fout.write('\nendmodule')
+        fout.flush()
+
+
+        fout.close()
+        return

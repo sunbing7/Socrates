@@ -37,7 +37,7 @@ class DTMCImpl():
         self.label_diff = 0
         self.criteria = 0.1
         self.sens_analysis = False #sensitivity analysis
-        self.dbgmsg = False
+        self.dbgmsg = True
 
     def __generate_x(self, shape, lower, upper):
         size = np.prod(shape)

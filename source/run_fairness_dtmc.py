@@ -68,6 +68,9 @@ def main():
     elif args.dataset == 'credit':
         pathX = '../benchmark/fairness/credit/data/'
         pathY = '../benchmark/fairness/credit/data/labels.txt'
+    elif args.dataset == 'FairSquare':
+        pathX = '../benchmark/fairness/FairSquare/data/'
+        pathY = '../benchmark/fairness/FairSquare/data/labels.txt'
 
     y0s = np.array(ast.literal_eval(read(pathY)))
 
