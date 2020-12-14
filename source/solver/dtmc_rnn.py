@@ -21,8 +21,8 @@ class DTMCImpl_rnn():
         self.s = []  # states
         self.s_idx = []  # index of states
         self.s0 = 0
-        self.delta = 0.001
-        self.error = 0.01
+        self.delta = 0.05
+        self.error = 0.005
         self.n_ij = []
         self.n_i = []
         self.A = []
@@ -37,7 +37,7 @@ class DTMCImpl_rnn():
         self.feature = []  # additional feature to analyze
         self.intermediate_layer = []  # intermediate layer to analyze
         self.neurons = []  # neuron index at intermediate layer to analyze
-        self.neuron = []  # current neuron index at intermediate layer analyzing
+        self.neuron = None  # current neuron index at intermediate layer analyzing
         self.under_analyze = []
         self.final = []  # final state
         self.timeout = 20  # timeout value set to 20min
@@ -52,15 +52,17 @@ class DTMCImpl_rnn():
         self.embedding_index = None #embedding index
         self.nlp_model = None   #embedding model
         self.data_used = 0
-        self.prism_model_path = '../benchmark/rnn_fairness/nnet/jigsaw_lstm/prism_model/model.pm'
-        self.reuse_sample = False
-        self.gen_f = None   # file handler of gen.txt
-        self.gen_f_w = None  # file handler of gen.txt
-        self.generated_samples = 0  #number of samples generated and stored in gen.txt file
-        self.gen_offset = 0 # pos of gen.txt being read
+        self.prism_model_path = '../benchmark/rnn_fairness/nnet/jigsaw_lstm_6/prism_model/model.pm'
+        #self.reuse_sample = False
+        #self.gen_f = None   # file handler of gen.txt
+        #self.gen_f_w = None  # file handler of gen.txt
+        #self.generated_samples = 0  #number of samples generated and stored in gen.txt file
+        #self.gen_offset = 0 # pos of gen.txt being read
         self.repair = False
+        self.repair_neuron = None
         self.repair_layer = None
         self.repair_w = None
+        self.most_sens_cell = None
 
     def __generate_x(self):
 
@@ -82,11 +84,12 @@ class DTMCImpl_rnn():
 
         x_w[index] = synonym[index2][0]
 
+        '''
         if self.reuse_sample == False:
             self.gen_f.write(str(x.tolist()) + '\n')
             self.gen_f_w.write(str(x_w.tolist()) + '\n')
             self.generated_samples = self.generated_samples + 1
-
+        '''
         return x, x_w
 
     def __get_x(self):
@@ -111,6 +114,7 @@ class DTMCImpl_rnn():
 
         return x0, x0_w
 
+    '''
     def __get_x_reuse(self):
         # select x0 randomly from training data
         index = self.data_used
@@ -130,9 +134,10 @@ class DTMCImpl_rnn():
         x0_w = np.array(ast.literal_eval(rd_w_line))
 
         return x0, x0_w
+    '''
 
     def solve(self, model, assertion, display=None):
-
+        overall_starttime = time.time()
         self.model = model
         self.assertion = assertion
         self.display = display
@@ -179,71 +184,56 @@ class DTMCImpl_rnn():
         if 'confidence' in spec:
             self.delta = 1 - math.sqrt(1 - (spec['confidence']))
 
-        if 'intermediate' in spec:
-            self.intermediate_layer = np.array(ast.literal_eval(read(spec['intermediate'])))
-
-        #self.reuse_sample = True
-        #self.generated_samples = 36700 - 100
-
+        preparation_time = time.time() - overall_starttime
+        '''
         if self.reuse_sample == False:
             self.gen_f = open(self.data_path + '/' + 'gen.txt', 'w+')
             self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'w+')
         else:
             self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
             self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
-
+        '''
 
         print('Error tolerance: {:.5f}'.format(self.error))
-        print('Accuracy: {:.5f}'.format(self.delta))
+        print('Confidence: {:.5f}'.format(self.delta))
         print('Fairness Criteria: {}'.format(self.criteria))
         print('Timeout: {}s'.format(self.timeout))
-
+        
         # print('Learning DTMC model...')
         self.learn_dtmc_model()
-
+        '''
         self.gen_f.close()
         self.gen_f_w.close()
-
+        '''
         # analyze fairness
         # print('Analyzing fairness...')
-        res, is_fair, prob_diff = self.analyze_fairness()
-        print('prob diff: {}'.format(prob_diff))
+        res, is_fair, prob_diff, weight_matrix = self.analyze_fairness()
+        print('\nprob diff: {}\n'.format(prob_diff))
 
         self.export_prism_model()
 
-        # repair
-        print('Start reparing...')
-        self.repair = True
-        options = {'c1': 0.41, 'c2': 0.41, 'w': 0.8}
-
-        optimizer = ps.single.GlobalBestPSO(n_particles=5, dimensions=1, options=options,
-                                            bounds=([-1.0], [1.0]),
-                                            init_pos=np.array(
-                                                [[0.0],[0.0],[0.0],[0.0],[0.0]]))
-
-        # Perform optimization
-        best_cost, best_pos = optimizer.optimize(self.pso_fitness_func, iters=20)
-
-        # Obtain the cost history
-        print(optimizer.cost_history)
-        # Obtain the position history
-        print(optimizer.pos_history)
-        # Obtain the velocity history
-        #print(optimizer.velocity_history)
-
-        print('best cost: {}'.format(best_cost))
-        print('best pos: {}'.format(best_pos))
+        analyze_time = time.time() - preparation_time - overall_starttime
 
         if is_fair:
             return
-        return
 
         self.sens_analysis = True
 
+        # adjust accuracy for sensitivity analysis
+        ori_delta = self.delta
+        ori_error = self.error
+        ori_timeout = self.timeout
+
+        self.delta = 0.15
+        self.error = 0.025
+        self.timeout = 300
+
         # perform sensitivity analysis
         print("Perform sensitivity analysis:")
+
         # other features
-        print('\nOther Feature Analysis:')
+        '''
+        print('Other Feature Analysis:')
         if 'feature' in spec:
             self.feature = np.array(ast.literal_eval(read(spec['feature'])))
 
@@ -265,7 +255,7 @@ class DTMCImpl_rnn():
             self.analyze_fairness()
 
             self.feature = []
-
+        '''
         # other neurons
         if 'intermediate' in spec:
             self.intermediate_layer = np.array(ast.literal_eval(read(spec['intermediate'])))
@@ -273,52 +263,211 @@ class DTMCImpl_rnn():
         if 'neurons' in spec:
             self.neurons = np.array(ast.literal_eval(read(spec['neurons'])))
 
-        print('\nHidden Neuron Analysis:')
+        print('Hidden Neuron Analysis:')
         print('Intermediate layers: {}'.format(self.intermediate_layer))
         print('Intermediate neuron index: {}'.format(self.neurons))
 
         if len(self.neurons) != 0:
-
+            weight_matrix = []
             for i in range(0, len(self.neurons)):
+                self.starttime = time.time()
                 self.neuron = self.neurons[i]
                 print('\nNeuron: {}'.format(self.neuron))
-                # calculate offset to keep each state identical
-                self.calc_offset()
-
-                # calculate bitshift for state coding
-                self.calc_bitshift()
+                '''
+                if self.reuse_sample == False:
+                    self.gen_f = open(self.data_path + '/' + 'gen.txt', 'w+')
+                    self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'w+')
+                else:
+                    self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
+                    self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
+                '''
 
                 # print('Learning DTMC model...')
                 self.learn_dtmc_model()
-
+                '''
+                self.gen_f.close()
+                self.gen_f_w.close()
+                '''
                 # analyze fairness
                 # print('Analyzing fairness...')
-                self.analyze_fairness()
+                _, _, _, weight = self.analyze_fairness()
+                weight_matrix.append(weight)
+            # compare sensitivity
+            sens_cell = []
+            sens_rank = []
+            idx = 0
+            for m_cell in weight_matrix:
+                # now m_cell contain the transition weight matrix for current cell
+                # m_cell[1] contain probability to each sensitive group
+                # m_cell[2] contain probability to output
+                m_ph = m_cell[1]
+                m_ph.sort()
 
-                self.starttime = time.time()
+                max_ph = m_ph[len(m_ph) - 1][0] - m_ph[0][0]
+
+                s_ho = []
+                s_ho.append(m_cell[2][0][0] * max_ph)
+                s_ho.append(m_cell[2][1][0] * max_ph)
+                s_r = []
+                sens_cell.append(s_ho)
+                s_r.append(max(s_ho[0], s_ho[1]))
+                s_r.append(idx)
+                sens_rank.append(s_r)
+                idx = idx + 1
+
+            sens_rank.sort()
+
+            self.debug_print('Sensitivity ranking:')
+            for item in sens_rank:
+                self.debug_print(item)
+
+            self.debug_print('Sensitivity details:')
+            for item in sens_cell:
+                self.debug_print(item)
+
+            self.most_sens_cell = sens_rank[-1][1]
+
+
+        self.sens_analysis = False
+
+        sensitivity_time = time.time() - analyze_time - preparation_time - overall_starttime
+
+        # repair
+        self.repair = True
+        if self.repair == True:
+            # repair
+            print('Start reparing...')
+            options = {'c1': 0.41, 'c2': 0.41, 'w': 0.8}
+
+            optimizer = ps.single.GlobalBestPSO(n_particles=5, dimensions=1, options=options,
+                                                bounds=([-1.0], [1.0]),
+                                                init_pos=np.array(
+                                                    [[0.0],[0.0],[0.0],[0.0],[0.0]]))
+
+            # Perform optimization
+            best_cost, best_pos = optimizer.optimize(self.pso_fitness_func, iters=20)
+
+            # Obtain the cost history
+            print(optimizer.cost_history)
+            # Obtain the position history
+            print(optimizer.pos_history)
+            # Obtain the velocity history
+            #print(optimizer.velocity_history)
+            print('neuron to repair: {} at layter: {}'.format(self.repair_neuron, self.repair_layer))
+            #print('best cost: {}'.format(best_cost))
+            #print('best pos: {}'.format(best_pos))
+        self.repair = False
+
+        repair_time = time.time() - sensitivity_time - analyze_time - preparation_time - overall_starttime
+
+        # change back acc req for testing
+        self.delta = ori_delta
+        self.error = ori_error
+        self.timeout = ori_timeout
+
+        # verify prob diff and model accuracy after repair
+        r_prob_diff, r_acc = self.test_repaired_net(best_pos[0])
+        print('Probability difference after repair: {}'.format(r_prob_diff))
+        print('Network Accuracy after repair: {}'.format(r_acc))
+
+        valid_time = time.time() - repair_time - sensitivity_time - analyze_time - preparation_time - overall_starttime
+
+        # timing measurement
+        print('Total execution time(s): {}'.format(time.time() - overall_starttime))
+        print('Model verification time (s): {}'.format(analyze_time))
+        print('Sensitivity analysis time (s): {}'.format(sensitivity_time))
+        print('Repair time (s): {}'.format(repair_time))
+        print('Validation time (s): {}'.format(valid_time))
+
 
     def pso_fitness_func(self, weight):
 
-        self.reuse_sample = True
-
+        #self.reuse_sample = True
 
         result = []
         for i in range (0, len(weight)):
-            self.repair_layer = 0
+            self.repair_neuron = self.most_sens_cell
+            self.repair_layer = self.intermediate_layer[0]
             self.repair_w = weight[i][0]
-            self.starttime = time.time()
 
+            accuracy = self.net_accuracy_test(self.repair_neuron, weight[i][0], self.intermediate_layer[0])
+
+            self.starttime = time.time()
+            '''
             self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
             self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
+            '''
+
             self.learn_dtmc_model()
 
+            '''
             self.gen_f.close()
             self.gen_f_w.close()
-            res, is_fair, prob_diff = self.analyze_fairness()
-            result.append(prob_diff)
+            '''
+
+            _, _, prob_diff, _ = self.analyze_fairness()
+
+            _result = prob_diff + 0.3 * (1 - accuracy)
+
+            self.debug_print('Repaired prob_diff: {}, accuracy: {}'.format(prob_diff, accuracy))
+
+            result.append(_result)
         print(result)
 
         return result
+
+    def test_repaired_net(self, weight):
+        #self.reuse_sample = True
+        self.repair_neuron = self.most_sens_cell
+        self.repair_layer = self.intermediate_layer[0]
+        self.repair_w = weight
+
+        self.repair = True
+        accuracy = self.net_accuracy_test(self.repair_neuron, weight, self.intermediate_layer[0])
+
+        self.starttime = time.time()
+        '''
+        self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
+        self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
+        '''
+        self.learn_dtmc_model()
+        '''
+        self.gen_f.close()
+        self.gen_f_w.close()
+        '''
+        _, _, prob_diff, _ = self.analyze_fairness()
+        self.repair = False
+        return prob_diff, accuracy
+
+    def net_accuracy_test(self, r_neuron=0, r_weight=0, r_layer=0):
+        pathX = '../benchmark/rnn_fairness/data/jigsaw/sensitive/'
+        pathY = '../benchmark/rnn_fairness/data/jigsaw/sensitive/labels.txt'
+
+        y0s = np.array(ast.literal_eval(read(pathY)))
+
+        l_pass = 0
+        l_fail = 0
+
+        for i in range(300):
+            x0_file = pathX + 'data' + str(i) + '.txt'
+            x0 = np.array(ast.literal_eval(read(x0_file)))
+
+            #print('Data {}'.format(i))
+
+            y, _ = self.model.apply_lstm_repair(x0, r_neuron, r_weight, r_layer)
+            #y = self.model.apply(x0)
+            lbl_x0 = np.argmax(y, axis=1)[0]
+
+            # accuracy test
+            if lbl_x0 == y0s[i]:
+                l_pass = l_pass + 1
+            else:
+                l_fail = l_fail + 1
+        acc = l_pass / (l_pass + l_fail)
+
+        #self.debug_print("Accuracy of ori network: %f.\n" % (acc))
+
+        return acc
 
     def pso_fitness_func_test(self, weight):
         prob_diff = 0.0
@@ -329,51 +478,6 @@ class DTMCImpl_rnn():
 
         return result
 
-
-    def calc_offset(self):
-        lower = self.model.lower
-        upper = self.model.upper
-
-        size = upper.size
-        self.offset = []
-        self.offset.append(1)
-        for i in range(1, size):
-            self.offset.append(self.offset[i - 1] + upper[i - 1] - lower[i - 1] + 1)
-
-    def calc_bitshift(self):
-        self.bitshift = []
-        total_analyze = len(
-            self.intermediate_layer) + 4  # start + input layer (sensitive + other feature) + output layer
-
-        for i in range(0, total_analyze):
-            if i == 0:  # start
-                self.bitshift.append(0)
-            elif i == 1:  # input sensitive
-                self.bitshift.append(4)
-            elif i == 2:  # input other feature
-                # sensitive feature range
-                cal_range = self.model.upper[self.sensitive[0]] - self.model.lower[self.sensitive[0]]
-                sensitive_range = int(cal_range) + 1
-
-                # how many bits needed? how many nibbles
-                nibbles = int(sensitive_range / 16 + 1)  # + 1 to handle floating point result
-
-                self.bitshift.append(nibbles * 4 + self.bitshift[i - 1])
-            elif i != total_analyze - 1:
-                if len(self.feature) == 0:
-                    self.bitshift.append(self.bitshift[i - 1])
-                    continue
-
-                # other feature range
-                cal_range = self.model.upper[self.feature[0]] - self.model.lower[self.feature[0]]
-                feature_range = int(cal_range) + 1
-
-                # how many bits needed? how many nibbles
-                nibbles = int(feature_range / 16 + 1)  # + 1 to handle floating point result
-
-                self.bitshift.append(nibbles * 4 + self.bitshift[i - 1])
-            elif i == total_analyze - 1:
-                self.bitshift.append(1)
 
     '''
     Update model when add a new trace path
@@ -389,7 +493,7 @@ class DTMCImpl_rnn():
             idx_end = self.s.index(path[i])
             self.n_ij[idx_start][idx_end] = self.n_ij[idx_start][idx_end] + 1
             self.n_i[idx_start] = self.n_i[idx_start] + 1
-            self.A[idx_start][idx_end] = self.n_ij[idx_start][idx_end] / self.n_i[idx_start]
+            # self.A[idx_start][idx_end] = self.n_ij[idx_start][idx_end] / self.n_i[idx_start]
 
         return
 
@@ -434,7 +538,7 @@ class DTMCImpl_rnn():
         self.num_of_path = 0
         self.data_used = 0
         self.num_of_path = 0
-        self.gen_offset = 0
+        #self.gen_offset = 0
 
         # initialize states of inputs:
 
@@ -442,9 +546,16 @@ class DTMCImpl_rnn():
         self.add_state(0, 0)
 
         # intermediat layer
-        if len(self.intermediate_layer) != 0:
-            self.add_state(11, 2)
-            self.add_state(12, 2)
+        # states: 0: start
+        # 1: output 1
+        # 2: output 2
+        # 3 ... self.sens_group + 3: sens groups
+        # self.sens_group + 3 + 1: hidden low
+        # self.sens_group + 3 + 1 + 1: hidden high
+
+        if self.sens_analysis == True and self.neuron != None:
+            self.add_state(self.sens_group + 3 + 1, 2)
+            self.add_state(self.sens_group + 3 + 2, 2)
 
             self.add_state(1, 3)
             self.add_state(2, 3)
@@ -522,10 +633,14 @@ class DTMCImpl_rnn():
             if self.data_used < self.data_len:
                 x, x_w = self.__get_x() # x_w: word vector
                 self.data_used = self.data_used + 1
+            else:
+                x, x_w = self.__generate_x()
+            '''
             elif self.reuse_sample == False:
                 x, x_w = self.__generate_x()
             elif self.reuse_sample == True:
                 x, x_w = self.__get_x_reuse()
+            '''
 
             #y = self.model.apply(x)
             #y = np.argmax(y, axis=1)[0]
@@ -533,26 +648,12 @@ class DTMCImpl_rnn():
             # intermediat layer
 
             if self.repair == False:
-                y, cell = self.model.apply_lstm_inter(x)
+                y, cell = self.model.apply_lstm_inter(x, self.neuron)
             else:
-                y, cell = self.model.apply_lstm_repair(x, self.repair_layer, self.repair_w)
+                y, cell = self.model.apply_lstm_repair(x, self.repair_neuron, self.repair_w, self.repair_layer)
             # now cell contain a sequence of hidden cell values of length equal to number of timesteps
             y = np.argmax(y, axis=1)[0]
-            '''
-            intermediate_result = []
-            for i in range(0, len(layer_op)):
-                if i in self.intermediate_layer:
-                    layer_sign = np.sign(layer_op[i])
 
-                    # code into one state: each neuron represendted by 2 bits
-                    # TODO: only support positive and non-positive now
-                    # neuron by neuron
-                    layer_state = int(layer_sign[0][self.neuron] + 1)
-                    self.add_state((1 << self.bitshift[3]), 2)
-                    self.add_state((2 << self.bitshift[3]), 2)
-
-                    intermediate_result.append((layer_state << self.bitshift[3]))
-            '''
             path = [self.s0]
 
             # input feature under analysis
@@ -565,13 +666,7 @@ class DTMCImpl_rnn():
             path.append(to_add)
 
             # add intermediate
-            if len(self.intermediate_layer) != 0:
-                '''
-                if cell > 0.27:
-                    to_add = 12
-                else:
-                    to_add = 11
-                '''
+            if self.sens_analysis == True and (self.neuron) != None:
                 to_add = cell
                 #path.append(to_add)
                 path = path + to_add
@@ -620,7 +715,7 @@ class DTMCImpl_rnn():
 
         kmeans = MiniBatchKMeans(n_clusters=2, init='k-means++', batch_size=self.step)
         #kmeans = KMeans(n_clusters=2, init='k-means++', max_iter=300, n_init=10, random_state=0)
-        if len(self.intermediate_layer) != 0:
+        if self.sens_analysis == True and (self.neuron) != None:
             self.debug_print('Debug: Cluster centers at iterations:')
 
         while (self.is_more_sample_needed() == True):
@@ -629,7 +724,7 @@ class DTMCImpl_rnn():
             # number of hidden states = len(new_path) - 3
             num_hidden_state = len(new_path[0]) - 3
             cluster_label = []
-            if len(self.intermediate_layer) != 0:
+            if self.sens_analysis == True and (self.neuron) != None:
                 path_gen = path_gen + new_path
                 new_path_array = np.array(new_path)
 
@@ -641,14 +736,14 @@ class DTMCImpl_rnn():
                 #hidden_state = (new_path_array[:,2]).reshape(-1, 1)
                 #kmeans = kmeans.partial_fit(hidden_state)
                 #cluster_label = kmeans.labels_
-            if len(self.intermediate_layer) != 0:
-                self.debug_print('{}: {}, {}'.format(self.num_of_path, kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
+            #if (self.neuron) != None:
+            #    self.debug_print('{}: {}, {}'.format(self.num_of_path, kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
 
             for i in range(0, self.step):
                 path = new_path[i]
-                if len(self.intermediate_layer) != 0:
+                if self.sens_analysis == True and (self.neuron) != None:
                     for h in range(0, num_hidden_state):
-                        path[2 + h] = cluster_label[h][i] + 11
+                        path[2 + h] = cluster_label[h][i] + self.sens_group + 4
                 self.update_model(path)
                 # for item in path[i]:
                 #    file.write("%f\t" % item)
@@ -662,9 +757,8 @@ class DTMCImpl_rnn():
         #cluster_label = kmeans.labels_
 
         # print cluster center
-        if len(self.intermediate_layer) != 0:
-            if len(self.intermediate_layer) != 0:
-                print('Hidden cell cluster centers: \n{}, {}'.format(kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
+        if self.sens_analysis == True and (self.neuron) != None:
+            print('Hidden cell cluster centers: \n{}, {}'.format(kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
 
         self.finalize_model()
 
@@ -676,17 +770,23 @@ class DTMCImpl_rnn():
 
     def finalize_model(self):
         for i in range(0, self.m):
-            if self.n_i[i] == 0.0:
-                for j in range(0, self.m):
-                    self.n_ij[i][j] = 1 / self.m
+            for j in range (0, self.m):
+                if self.n_i[i] == 0.0:
+                    self.A[i][j] = 1.0 / self.m
+                else:
+                    self.A[i][j] = self.n_ij[i][j] / self.n_i[i]
+
         return
 
     def analyze_fairness(self):
+        hidden_num = 0
+        if self.sens_analysis == True and self.neuron != None:
+            hidden_num = 1
         # generate weight matrix
         weight = []
         from_symbol = []
         to_symbol = []
-        for i in range(1, (1 + len(self.intermediate_layer)) + 2):
+        for i in range(1, (1 + hidden_num) + 2):
             w = []
             _from_symbol = []
             _to_symbol = []
@@ -707,39 +807,39 @@ class DTMCImpl_rnn():
 
         # analyze independence fairness
         res = []
-        res.append(weight[(1 + len(self.intermediate_layer))])
+        res.append(weight[(1 + hidden_num)])
         self.detail_print("\nProbabilities:")
         # print('Sensitive feature {}:'.format(self.sensitive[-1]))
 
         # print index
         self.detail_print("transition from:")
-        for item in from_symbol[(1 + len(self.intermediate_layer))]:
+        for item in from_symbol[(1 + hidden_num)]:
             self.detail_print("0x%016X" % int(self.s[item]))
         self.detail_print("transition to:")
-        for item in to_symbol[(1 + len(self.intermediate_layer))]:
+        for item in to_symbol[(1 + hidden_num)]:
             self.detail_print("0x%016X" % int(self.s[item]))
 
         # print transformation matrix
         self.detail_print("\n")
-        for item in weight[(1 + len(self.intermediate_layer))]:
+        for item in weight[(1 + hidden_num)]:
             self.detail_print(item)
         # print(np.matrix(weight[len(self.sensitive)]))
         self.detail_print("\n")
-        for i in range(0, (1 + len(self.intermediate_layer))):
-            result = np.matmul(weight[(1 + len(self.intermediate_layer)) - i - 1], res[i])
+        for i in range(0, (1 + hidden_num)):
+            result = np.matmul(weight[(1 + hidden_num) - i - 1], res[i])
             res.append(result)
             '''
-            if i != (len(self.sensitive) + len(self.intermediate_layer)) - 1:
-                print('Sensitive feature {}:'.format(self.sensitive[(len(self.sensitive) + len(self.intermediate_layer)) - i - 2]))
+            if i != (len(self.sensitive) + hidden_num) - 1:
+                print('Sensitive feature {}:'.format(self.sensitive[(len(self.sensitive) + hidden_num) - i - 2]))
             else:
                 print("Overal probabilities:")
             '''
             # print index
             self.detail_print("transition from:")
-            for item in from_symbol[(1+ len(self.intermediate_layer)) - i - 1]:
+            for item in from_symbol[(1+ hidden_num) - i - 1]:
                 self.detail_print("0x%016X" % int(self.s[item]))
             self.detail_print("transition to:")
-            for item in to_symbol[(1 + len(self.intermediate_layer))]:
+            for item in to_symbol[(1 + hidden_num)]:
                 self.detail_print("0x%016X" % int(self.s[item]))
 
             self.detail_print("\n")
@@ -756,7 +856,7 @@ class DTMCImpl_rnn():
         #    self.detail_print(item)
 
         # check against criteria
-        weight_to_check = weight[(1 + len(self.intermediate_layer))]
+        weight_to_check = weight[(1 + hidden_num)]
         # TODO: to handle more than 2 labels
 
         weight_to_check.sort()
@@ -792,10 +892,12 @@ class DTMCImpl_rnn():
             for item in weight[i]:
                 self.debug_print(item)
 
+        self.debug_print("\n")
+
         for i in range (0, len(self.n_i)):
             self.debug_print('n_{}: {}'.format(i, self.n_i[i]))
 
-        return res, fairness_result, prob_diff
+        return res, fairness_result, prob_diff, weight
 
     def aequitas_test(self):
         num_trials = 400

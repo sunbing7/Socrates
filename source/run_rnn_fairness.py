@@ -6,7 +6,6 @@ import ast
 from parser import parse
 from utils import *
 
-
 def add_assertion(args, spec):
     assertion = dict()
 
@@ -31,6 +30,7 @@ def add_solver(args, spec):
 
 
 def main():
+    test_acc_only = False
     np.set_printoptions(threshold=20)
     parser = argparse.ArgumentParser(description='nSolver')
 
@@ -59,8 +59,8 @@ def main():
     upper = model.upper[0]
 
     if args.dataset == 'jigsaw':
-        pathX = '../benchmark/rnn_fairness/data/jigsaw/'
-        pathY = '../benchmark/rnn_fairness/data/jigsaw/labels.txt'
+        pathX = '../benchmark/rnn_fairness/data/jigsaw/sensitive/'
+        pathY = '../benchmark/rnn_fairness/data/jigsaw/sensitive/labels.txt'
     elif args.dataset == 'wiki':
         pathX = '../benchmark/rnn_fairness/data/wiki/'
         pathY = '../benchmark/rnn_fairness/data/wiki/labels.txt'
@@ -68,42 +68,36 @@ def main():
     y0s = np.array(ast.literal_eval(read(pathY)))
 
     model.shape = (100, 50)
-    solver.solve(model, assertion)
 
     l_pass = 0
     l_fail = 0
 
-    for i in range(100):
-        assertion['x0'] = pathX + 'data' + str(i) + '.txt'
-        x0 = np.array(ast.literal_eval(read(assertion['x0'])))
+    if test_acc_only == True:
+        for i in range(561):
+            assertion['x0'] = pathX + 'data' + str(i) + '.txt'
+            x0 = np.array(ast.literal_eval(read(assertion['x0'])))
 
-        shape_x0 = (int(x0.size / 50), 50)
+            shape_x0 = (int(x0.size / 50), 50)
 
-        model.shape = shape_x0
-        model.lower = np.full(x0.size, lower)
-        model.upper = np.full(x0.size, upper)
+            model.shape = shape_x0
+            model.lower = np.full(x0.size, lower)
+            model.upper = np.full(x0.size, upper)
 
-        output_x0 = model.apply(x0)
-        lbl_x0 = np.argmax(output_x0, axis=1)[0]
+            output_x0 = model.apply(x0)
+            lbl_x0 = np.argmax(output_x0, axis=1)[0]
 
+            print('Data {}'.format(i))
 
-        print('Data {}'.format(i))
-        #print('x0 = {}'.format(x0))
-        #print('output_x0 = {}'.format(output_x0))
-        #print('lbl_x0 = {}'.format(lbl_x0))
-        #print('y0 = {}\n'.format(y0s[i]))
+            # accuracy test
 
-        # accuracy test
+            if lbl_x0 == y0s[i]:
+                l_pass = l_pass + 1
+            else:
+                l_fail = l_fail + 1
 
-        if lbl_x0 == y0s[i]:
-            l_pass = l_pass + 1
-        else:
-            l_fail = l_fail + 1
-
-        #print('\n============================\n')
-
-    print("Accuracy of ori network: %f.\n" % (l_pass / (l_pass + l_fail)))
-
+        print("Accuracy of ori network: %f.\n" % (l_pass / (l_pass + l_fail)))
+    else:
+        solver.solve(model, assertion)
 
 if __name__ == '__main__':
     main()

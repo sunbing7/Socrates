@@ -77,20 +77,20 @@ class Model:
         return output, layer_output
 
 
-    def apply_lstm_inter(self, x):
+    def apply_lstm_inter(self, x, neuron=0):
         if self.layers == None:
             return self.__apply_ptmodel(x)
 
         shape_i = [1, *self.shape[1:]]
         size_i = np.prod(shape_i)
 
-        len = int(x.size / size_i)
+        length = int(x.size / size_i)
 
         hidden_state = [] # should contain xlen elements
 
         #lstm_cell_mean = 0
 
-        for i in range(len):
+        for i in range(length):
             x_i = x[size_i * i : size_i * (i + 1)].reshape(shape_i)
             output = x_i
 
@@ -102,11 +102,11 @@ class Model:
                     # test first cell: output[0][0]
                     #lstm_cell_mean = lstm_cell_mean + output[0][0]
                     #output[0][0] = 1.397 * output[0][0];
-                    hidden_state.append(output[0][0])
+                    hidden_state.append(output[0][neuron])
 
                 layer_index = layer_index + 1
 
-        #lstm_cell_mean = lstm_cell_mean / len
+        #lstm_cell_mean = lstm_cell_mean / length
 
         for layer in self.layers:
             layer.reset()
@@ -114,20 +114,20 @@ class Model:
         return output, hidden_state
 
 
-    def apply_lstm_repair(self, x, layer_r=None, weight=None):
+    def apply_lstm_repair(self, x, neuron=0, weight=0.0, layer_r=0):
         if self.layers == None:
             return self.__apply_ptmodel(x)
 
         shape_i = [1, *self.shape[1:]]
         size_i = np.prod(shape_i)
 
-        len = int(x.size / size_i)
+        length = int(x.size / size_i)
 
         hidden_state = [] # should contain xlen elements
 
         #lstm_cell_mean = 0
 
-        for i in range(len):
+        for i in range(length):
             x_i = x[size_i * i : size_i * (i + 1)].reshape(shape_i)
             output = x_i
 
@@ -138,12 +138,12 @@ class Model:
                     # lstm layer
                     # test first cell: output[0][0]
                     #lstm_cell_mean = lstm_cell_mean + output[0][0]
-                    output[0][layer_r] = (weight + 1) * output[0][layer_r];
-                    hidden_state.append(output[0][layer_r])
+                    output[0][neuron] = (weight + 1.0) * output[0][neuron];
+                    hidden_state.append(output[0][neuron])
 
                 layer_index = layer_index + 1
 
-        #lstm_cell_mean = lstm_cell_mean / len
+        #lstm_cell_mean = lstm_cell_mean / length
 
         for layer in self.layers:
             layer.reset()
@@ -159,11 +159,11 @@ class Model:
         shape_i = [1, *self.shape[1:]]
         size_i = np.prod(shape_i)
 
-        len = int(x.size / size_i)
+        length = int(x.size / size_i)
 
         lstm_cell_mean = 0
 
-        for i in range(len):
+        for i in range(length):
             x_i = x[size_i * i : size_i * (i + 1)].reshape(shape_i)
             output = x_i
 
@@ -177,7 +177,7 @@ class Model:
                     output[0][0] = 0.2710
                 layer_index = layer_index + 1
 
-        lstm_cell_mean = lstm_cell_mean / len
+        lstm_cell_mean = lstm_cell_mean / length
 
         for layer in self.layers:
             layer.reset()
