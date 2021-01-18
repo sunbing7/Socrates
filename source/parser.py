@@ -224,6 +224,8 @@ def parse_solver(spec):
         solver = DTMC()
     elif algorithm == 'dtmc_rnn':
         solver = DTMC_rnn()
+    elif algorithm == 'verifair':
+        solver = VeriFair()
 
     return solver
 

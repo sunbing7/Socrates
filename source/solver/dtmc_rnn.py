@@ -7,6 +7,8 @@ from utils import *
 import time
 import ast
 from scipy import spatial
+import os.path
+from os import path
 from sklearn.cluster import KMeans
 from sklearn.cluster import MiniBatchKMeans
 import pyswarms as ps
@@ -38,6 +40,7 @@ class DTMCImpl_rnn():
         self.intermediate_layer = []  # intermediate layer to analyze
         self.neurons = []  # neuron index at intermediate layer to analyze
         self.neuron = None  # current neuron index at intermediate layer analyzing
+        self.hidden_cluster = 2
         self.under_analyze = []
         self.final = []  # final state
         self.timeout = 20  # timeout value set to 20min
@@ -46,9 +49,11 @@ class DTMCImpl_rnn():
         self.criteria = 0.1
         self.sens_analysis = False  # sensitivity analysis
         self.dbgmsg = True
+        self.output_path = None
         self.type = 'nlp'
         self.data_path = None   #path to training data
         self.data_len = 0   #len of training data
+        self.datapath = None    # path to accuracy test data
         self.embedding_index = None #embedding index
         self.nlp_model = None   #embedding model
         self.data_used = 0
@@ -62,6 +67,7 @@ class DTMCImpl_rnn():
         self.repair_neuron = None
         self.repair_layer = None
         self.repair_w = None
+        self.repair_num = 2
         self.most_sens_cell = None
 
     def __generate_x(self):
@@ -141,6 +147,7 @@ class DTMCImpl_rnn():
         self.model = model
         self.assertion = assertion
         self.display = display
+        self.dbgmsg = True
 
         spec = assertion
 
@@ -170,7 +177,7 @@ class DTMCImpl_rnn():
             #print(synonym)
 
         if 'sensitive_group' in spec:
-            self.sens_group = read(spec['sensitive_group'])
+            self.sens_group = (spec['sensitive_group'])
 
         if 'timeout' in spec:
             self.timeout = read(spec['timeout']) * 60
@@ -184,6 +191,31 @@ class DTMCImpl_rnn():
         if 'confidence' in spec:
             self.delta = 1 - math.sqrt(1 - (spec['confidence']))
 
+        if 'outpath' in spec:
+            self.output_path = spec['outpath']
+
+        if 'datapath' in spec:
+            self.datapath = spec['datapath']
+
+        '''
+        #ori_accuracy = self.net_accuracy_test([], [], [])
+        #print('Network Accuracy before repair: {}'.format(ori_accuracy))
+
+        # 8
+        self.repair_layer = [0, 0, 0]
+        self.repair_neuron = [2, 4, 1]
+        r_weight = [0.72284543, 0.6527531,  0.67253858]
+
+        self.repair_num = 3
+
+        r_prob_diff, r_acc = self.test_repaired_net(r_weight)
+        print('Probability difference after repair: {}'.format(r_prob_diff))
+        print('Network Accuracy after repair: {}'.format(r_acc))
+        #rep_accuracy = self.net_accuracy_test(self.repair_neuron, r_weight, self.repair_layer)
+        #print('Network Accuracy after repair: {}'.format(rep_accuracy))
+
+        return
+        '''
         preparation_time = time.time() - overall_starttime
         '''
         if self.reuse_sample == False:
@@ -194,39 +226,84 @@ class DTMCImpl_rnn():
             self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
         '''
 
-        print('Error tolerance: {:.5f}'.format(self.error))
-        print('Confidence: {:.5f}'.format(self.delta))
+        print('Error tolerance: {:.5f}'.format(self.error * 2))
+        print('Confidence: {:.5f}'.format(self.delta * 2))
         print('Fairness Criteria: {}'.format(self.criteria))
         print('Timeout: {}s'.format(self.timeout))
-        
+
+        '''
+        ori_accuracy = self.net_accuracy_test([], [], [])
+        print('Network Accuracy before repair: {}'.format(ori_accuracy))
+
+        self.repair_layer = [0, 0, 0]
+        self.repair_neuron = [3, 0, 4]
+        r_weight = [0.60807469, 0.66980363, 0.78913711]
+        self.repair_num = 3
+
+        r_prob_diff, r_acc = self.test_repaired_net(r_weight)
+        print('Probability difference after repair: {}'.format(r_prob_diff))
+        print('Network Accuracy after repair: {}'.format(r_acc))
+        #ori_accuracy = self.net_accuracy_test(r_neuron, r_weight, r_layer)
+        #print('Network Accuracy after repair: {}'.format(ori_accuracy))
+        return
+        '''
         # print('Learning DTMC model...')
-        self.learn_dtmc_model()
+        #sunbing self.learn_dtmc_model()
         '''
         self.gen_f.close()
         self.gen_f_w.close()
         '''
         # analyze fairness
         # print('Analyzing fairness...')
+        #sunbing
+        '''
         res, is_fair, prob_diff, weight_matrix = self.analyze_fairness()
-        print('\nprob diff: {}\n'.format(prob_diff))
+        if is_fair:
+            print('Network is fair!')
+        else:
+            print('Network is unfair!')
+        print('Maximum probability difference: {:.5f}\n'.format(prob_diff))
 
         self.export_prism_model()
-
+        print('PRISM model generated!\n')
+        #sunbing
+        '''
         analyze_time = time.time() - preparation_time - overall_starttime
 
-        if is_fair:
-            return
+        '''
+        ori_accuracy = self.net_accuracy_test([], [], [])
+        print('Network Accuracy before repair: {}'.format(ori_accuracy))
 
+        self.repair_layer = [0, 0, 0]
+        self.repair_neuron = [4, 1, 6]
+        r_weight = [-0.97381985, 0.39660913, 0.37834068]
+        self.repair_num = 3
+
+        r_prob_diff, r_acc = self.test_repaired_net(r_weight)
+        print('Probability difference after repair: {}'.format(r_prob_diff))
+        print('Network Accuracy after repair: {}'.format(r_acc))
+        #ori_accuracy = self.net_accuracy_test(r_neuron, r_weight, r_layer)
+        #print('Network Accuracy after repair: {}'.format(ori_accuracy))
+
+        return
+        '''
+        '''
+        if is_fair:
+            print('Model verification time (s): {}'.format(analyze_time))
+            return
+        '''
         self.sens_analysis = True
+        self.dbgmsg = True
 
         # adjust accuracy for sensitivity analysis
         ori_delta = self.delta
         ori_error = self.error
         ori_timeout = self.timeout
 
-        self.delta = 0.15
-        self.error = 0.025
-        self.timeout = 300
+        #sunbing
+        #self.delta = 0.15
+        #self.error = 0.025
+        #self.timeout = 300
 
         # perform sensitivity analysis
         print("Perform sensitivity analysis:")
@@ -263,16 +340,21 @@ class DTMCImpl_rnn():
         if 'neurons' in spec:
             self.neurons = np.array(ast.literal_eval(read(spec['neurons'])))
 
+        if 'repair_number' in spec:
+            self.repair_num = spec['repair_number']
+
         print('Hidden Neuron Analysis:')
         print('Intermediate layers: {}'.format(self.intermediate_layer))
         print('Intermediate neuron index: {}'.format(self.neurons))
 
         if len(self.neurons) != 0:
+            if 'hidden_cluster' in spec:
+                self.hidden_cluster = ast.literal_eval(read(spec['hidden_cluster']))
             weight_matrix = []
             for i in range(0, len(self.neurons)):
                 self.starttime = time.time()
                 self.neuron = self.neurons[i]
-                print('\nNeuron: {}'.format(self.neuron))
+                print('Neuron: {}'.format(self.neuron))
                 '''
                 if self.reuse_sample == False:
                     self.gen_f = open(self.data_path + '/' + 'gen.txt', 'w+')
@@ -288,6 +370,16 @@ class DTMCImpl_rnn():
                 self.gen_f.close()
                 self.gen_f_w.close()
                 '''
+                #sunbing export example here
+                self.export_prism_model()
+
+                #print matrix A
+                for item in self.A:
+                    print(item)
+
+                #end export example
+
+
                 # analyze fairness
                 # print('Analyzing fairness...')
                 _, _, _, weight = self.analyze_fairness()
@@ -311,26 +403,34 @@ class DTMCImpl_rnn():
                 s_r = []
                 sens_cell.append(s_ho)
                 s_r.append(max(s_ho[0], s_ho[1]))
-                s_r.append(idx)
+                s_r.append(0)   # layer
+                s_r.append(idx) # cell index
                 sens_rank.append(s_r)
                 idx = idx + 1
 
             sens_rank.sort()
+            overall_diff = sens_rank[::-1]
 
-            self.debug_print('Sensitivity ranking:')
-            for item in sens_rank:
-                self.debug_print(item)
+            self.repair_neuron = []
+            self.repair_layer = []
+            for i in range(0, self.repair_num):
+                self.repair_layer.append(int(overall_diff[i][1]))
+                self.repair_neuron.append(int(overall_diff[i][2]))
 
-            self.debug_print('Sensitivity details:')
-            for item in sens_cell:
-                self.debug_print(item)
+            print('\nRepair layer: {}'.format(self.repair_layer))
+            print('Repair neuron: {}'.format(self.repair_neuron))
 
-            self.most_sens_cell = sens_rank[-1][1]
+            print('Sensitivity of each neuron:')
+            for item in overall_diff:
+                print(item)
 
 
         self.sens_analysis = False
 
         sensitivity_time = time.time() - analyze_time - preparation_time - overall_starttime
+
+        #sunbing
+        return
 
         # repair
         self.repair = True
@@ -338,24 +438,28 @@ class DTMCImpl_rnn():
             # repair
             print('Start reparing...')
             options = {'c1': 0.41, 'c2': 0.41, 'w': 0.8}
-
+            '''
             optimizer = ps.single.GlobalBestPSO(n_particles=5, dimensions=1, options=options,
                                                 bounds=([-1.0], [1.0]),
                                                 init_pos=np.array(
                                                     [[0.0],[0.0],[0.0],[0.0],[0.0]]))
+            '''
+            optimizer = ps.single.GlobalBestPSO(n_particles=20, dimensions=self.repair_num, options=options,
+                                                bounds=([[-1.0] * self.repair_num, [1.0] * self.repair_num]),
+                                                init_pos=np.zeros((20, self.repair_num), dtype=float), ftol=1e-3, ftol_iter=5)
 
             # Perform optimization
-            best_cost, best_pos = optimizer.optimize(self.pso_fitness_func, iters=20)
+            best_cost, best_pos = optimizer.optimize(self.pso_fitness_func, iters=100)
 
             # Obtain the cost history
-            print(optimizer.cost_history)
+            #print(optimizer.cost_history)
             # Obtain the position history
-            print(optimizer.pos_history)
+            #print(optimizer.pos_history)
             # Obtain the velocity history
             #print(optimizer.velocity_history)
             print('neuron to repair: {} at layter: {}'.format(self.repair_neuron, self.repair_layer))
-            #print('best cost: {}'.format(best_cost))
-            #print('best pos: {}'.format(best_pos))
+            print('best cost: {}'.format(best_cost))
+            print('best pos: {}'.format(best_pos))
         self.repair = False
 
         repair_time = time.time() - sensitivity_time - analyze_time - preparation_time - overall_starttime
@@ -364,13 +468,43 @@ class DTMCImpl_rnn():
         self.delta = ori_delta
         self.error = ori_error
         self.timeout = ori_timeout
+        self.dbgmsg = True
 
         # verify prob diff and model accuracy after repair
-        r_prob_diff, r_acc = self.test_repaired_net(best_pos[0])
+        r_prob_diff, r_acc = self.test_repaired_net(best_pos)
         print('Probability difference after repair: {}'.format(r_prob_diff))
         print('Network Accuracy after repair: {}'.format(r_acc))
 
+        ori_accuracy = self.net_accuracy_test([], [], [])
+        print('Network Accuracy before repair: {}'.format(ori_accuracy))
+
         valid_time = time.time() - repair_time - sensitivity_time - analyze_time - preparation_time - overall_starttime
+
+        # output repaired network
+        # output repaired network
+        r_weights = []
+        for i in range (0, len(self.model.layers) - 1):
+            r_weights.append(self.model.layers[i].get_weight())
+        #self.repair_neuron = [3,4]
+        #self.repair_layer = [0,0]
+        #self.repair_num = 2
+        #best_pos = [0.1, 0.1]
+        for r_idx in range (0, self.repair_num):
+            r_layer = self.repair_layer[r_idx]
+            r_neuron = self.repair_neuron[r_idx]
+            r_weight = best_pos[r_idx]
+
+            j = int((r_layer + 1) / 2)
+            for i in range (0, len(r_weights[j][0])):
+                r_weights[j][r_neuron + 50][i] = (1 + r_weight) * r_weights[j][r_neuron][i]
+
+        if path.exists(self.output_path + '/repair') == False:
+            os.mkdir(self.output_path + '/repair')
+        fout = open(self.output_path + '/repair/weight.txt', 'w+')
+        for item in r_weights:
+            fout.write(str(item.tolist()))
+        fout.close()
+        print('Repared network generated!')
 
         # timing measurement
         print('Total execution time(s): {}'.format(time.time() - overall_starttime))
@@ -382,32 +516,19 @@ class DTMCImpl_rnn():
 
     def pso_fitness_func(self, weight):
 
-        #self.reuse_sample = True
-
         result = []
         for i in range (0, len(weight)):
-            self.repair_neuron = self.most_sens_cell
-            self.repair_layer = self.intermediate_layer[0]
-            self.repair_w = weight[i][0]
+            self.repair_w =  weight[i]
 
-            accuracy = self.net_accuracy_test(self.repair_neuron, weight[i][0], self.intermediate_layer[0])
+            accuracy = self.net_accuracy_test(self.repair_neuron, weight[i], self.repair_layer)
 
             self.starttime = time.time()
-            '''
-            self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
-            self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
-            '''
 
             self.learn_dtmc_model()
 
-            '''
-            self.gen_f.close()
-            self.gen_f_w.close()
-            '''
-
             _, _, prob_diff, _ = self.analyze_fairness()
 
-            _result = prob_diff + 0.3 * (1 - accuracy)
+            _result = prob_diff + 0.1 * (1 - accuracy)
 
             self.debug_print('Repaired prob_diff: {}, accuracy: {}'.format(prob_diff, accuracy))
 
@@ -417,31 +538,22 @@ class DTMCImpl_rnn():
         return result
 
     def test_repaired_net(self, weight):
-        #self.reuse_sample = True
-        self.repair_neuron = self.most_sens_cell
-        self.repair_layer = self.intermediate_layer[0]
         self.repair_w = weight
 
         self.repair = True
-        accuracy = self.net_accuracy_test(self.repair_neuron, weight, self.intermediate_layer[0])
+        accuracy = self.net_accuracy_test(self.repair_neuron, weight, self.repair_layer)
 
         self.starttime = time.time()
-        '''
-        self.gen_f = open(self.data_path + '/' + 'gen.txt', 'r')
-        self.gen_f_w = open(self.data_path + '_w/' + 'gen.txt', 'r')
-        '''
+
         self.learn_dtmc_model()
-        '''
-        self.gen_f.close()
-        self.gen_f_w.close()
-        '''
+
         _, _, prob_diff, _ = self.analyze_fairness()
         self.repair = False
         return prob_diff, accuracy
 
     def net_accuracy_test(self, r_neuron=0, r_weight=0, r_layer=0):
-        pathX = '../benchmark/rnn_fairness/data/jigsaw/sensitive/'
-        pathY = '../benchmark/rnn_fairness/data/jigsaw/sensitive/labels.txt'
+        pathX = self.datapath + '/'
+        pathY = self.datapath + '/labels.txt'
 
         y0s = np.array(ast.literal_eval(read(pathY)))
 
@@ -454,10 +566,20 @@ class DTMCImpl_rnn():
 
             #print('Data {}'.format(i))
 
-            y, _ = self.model.apply_lstm_repair(x0, r_neuron, r_weight, r_layer)
+            if len(r_neuron) == 0:
+                y = self.model.apply(x0)
+            else:
+                y = self.model.apply_lstm_repair(x0, r_neuron, r_weight, r_layer)
             #y = self.model.apply(x0)
-            lbl_x0 = np.argmax(y, axis=1)[0]
+            lbl_x0 = 1 - np.argmax(y, axis=1)[0]
 
+            '''
+            lbl_x0 = 0
+            if y[0][0] > y[0][1]:
+                lbl_x0 = 1
+            else:
+                lbl_x0 = 0
+            '''
             # accuracy test
             if lbl_x0 == y0s[i]:
                 l_pass = l_pass + 1
@@ -537,7 +659,6 @@ class DTMCImpl_rnn():
         self.A = []
         self.num_of_path = 0
         self.data_used = 0
-        self.num_of_path = 0
         #self.gen_offset = 0
 
         # initialize states of inputs:
@@ -595,7 +716,7 @@ class DTMCImpl_rnn():
             if self.n_i[i] < H:
                 # timeout?
                 if ((time.time() - self.starttime) > self.timeout):
-                    print('\nTimeout! States that need more sample:')
+                    print('Timeout! States that need more sample:')
                     needs_more = []
                     for k in range(i, self.m):
                         if self.s[k] in self.final:
@@ -612,7 +733,7 @@ class DTMCImpl_rnn():
                         if self.n_i[k] < H:
                             needs_more.append(self.s[k])
                             print("0x%016X: %d" % (int(self.s[k]), int(self.n_i[k])))
-                    print("\n")
+                    #print("\n")
 
                     return False
 
@@ -650,7 +771,7 @@ class DTMCImpl_rnn():
             if self.repair == False:
                 y, cell = self.model.apply_lstm_inter(x, self.neuron)
             else:
-                y, cell = self.model.apply_lstm_repair(x, self.repair_neuron, self.repair_w, self.repair_layer)
+                y = self.model.apply_lstm_repair(x, self.repair_neuron, self.repair_w, self.repair_layer)
             # now cell contain a sequence of hidden cell values of length equal to number of timesteps
             y = np.argmax(y, axis=1)[0]
 
@@ -713,7 +834,7 @@ class DTMCImpl_rnn():
 
         cluster_label = np.array([])
 
-        kmeans = MiniBatchKMeans(n_clusters=2, init='k-means++', batch_size=self.step)
+        kmeans = MiniBatchKMeans(n_clusters=self.hidden_cluster, init='k-means++', batch_size=self.step)
         #kmeans = KMeans(n_clusters=2, init='k-means++', max_iter=300, n_init=10, random_state=0)
         if self.sens_analysis == True and (self.neuron) != None:
             self.debug_print('Debug: Cluster centers at iterations:')
@@ -758,12 +879,12 @@ class DTMCImpl_rnn():
 
         # print cluster center
         if self.sens_analysis == True and (self.neuron) != None:
-            print('Hidden cell cluster centers: \n{}, {}'.format(kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
+            self.d_detail_print('Hidden cell cluster centers: \n{}, {}'.format(kmeans.cluster_centers_[0][0], kmeans.cluster_centers_[1][0]))
 
         self.finalize_model()
 
-        print('Number of traces generated: {}'.format(self.num_of_path))
-        print('Number of states: {}'.format(self.m))
+        self.d_detail_print('Number of traces generated: {}'.format(self.num_of_path))
+        self.d_detail_print('Number of states: {}'.format(self.m))
         #file.close()
         return
 
@@ -869,18 +990,27 @@ class DTMCImpl_rnn():
 
         prob_diff = weight_to_check[len(weight_to_check) - 1][0] - weight_to_check[non_zero_i][0]
 
+        # normalization (divide by sum)
+        '''
+        prob_base = 0.0
+        for weight_i in weight_to_check:
+            prob_base = prob_base + weight_i[0]
+
+        if prob_base != 0.0:
+            prob_diff = prob_diff / prob_base
+        '''
         fairness_result = 1
         if self.sens_analysis == False:
             if prob_diff > self.criteria:
                 fairness_result = 0
-                print("Failed accurcay criteria!")
+                self.d_detail_print("Failed accurcay criteria!")
             else:
                 fairness_result = 1
-                print("Passed accurcay criteria!")
+                self.d_detail_print("Passed accurcay criteria!")
 
-            print('Probability difference: {:.4f}\n'.format(prob_diff))
+            self.d_detail_print('Probability difference: {:.4f}\n'.format(prob_diff))
 
-            print("Total execution time: %fs\n" % (time.time() - self.starttime))
+            #print("Total execution time: %fs\n" % (time.time() - self.starttime))
 
         # accuracy_diff = self.label_diff / self.num_of_path
         # self.debug_print("Total label difference: %f\n" % (accuracy_diff))
@@ -945,12 +1075,18 @@ class DTMCImpl_rnn():
         return 0
 
     def detail_print(self, x):
-        if self.sens_analysis or self.dbgmsg:
+        if self.sens_analysis and self.dbgmsg:
             print(x)
 
     def debug_print(self, x):
         if self.dbgmsg:
             print(x)
+        pass
+
+    def d_detail_print(self, x):
+        if self.dbgmsg:
+            print(x)
+
 
     def find_closest_embeddings(word_vec, embeddings_index):
         return sorted(embeddings_index.keys(),
@@ -958,7 +1094,9 @@ class DTMCImpl_rnn():
 
 
     def export_prism_model(self):
-        fout = open(self.prism_model_path, 'w')
+        if path.exists(self.output_path + '/output_model') == False:
+            os.mkdir(self.output_path + '/output_model')
+        fout = open(self.output_path + '/output_model/original_model.pm', 'w+')
 
         fout.write('dtmc\n\n')
 

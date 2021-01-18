@@ -59,8 +59,8 @@ def main():
     upper = model.upper[0]
 
     if args.dataset == 'jigsaw':
-        pathX = '../benchmark/rnn_fairness/data/jigsaw/sensitive/'
-        pathY = '../benchmark/rnn_fairness/data/jigsaw/sensitive/labels.txt'
+        pathX = '../benchmark/rnn_fairness/data/jigsaw/all/'
+        pathY = '../benchmark/rnn_fairness/data/jigsaw/all/labels.txt'
     elif args.dataset == 'wiki':
         pathX = '../benchmark/rnn_fairness/data/wiki/'
         pathY = '../benchmark/rnn_fairness/data/wiki/labels.txt'
@@ -73,8 +73,9 @@ def main():
     l_fail = 0
 
     if test_acc_only == True:
-        for i in range(561):
+        for i in range(1000):
             assertion['x0'] = pathX + 'data' + str(i) + '.txt'
+            #assertion['x0'] = pathX + str(i) + '.txt'
             x0 = np.array(ast.literal_eval(read(assertion['x0'])))
 
             shape_x0 = (int(x0.size / 50), 50)
@@ -84,9 +85,15 @@ def main():
             model.upper = np.full(x0.size, upper)
 
             output_x0 = model.apply(x0)
-            lbl_x0 = np.argmax(output_x0, axis=1)[0]
-
-            print('Data {}'.format(i))
+            lbl_x0 = 1 - np.argmax(output_x0, axis=1)[0]
+            '''
+            lbl_x0 = 0
+            if output_x0[0][0] > output_x0[0][1]:
+                lbl_x0 = 1
+            else:
+                lbl_x0 = 0
+            '''
+            print('Data {}, y {}, lbl {}'.format(i, y0s[i], lbl_x0))
 
             # accuracy test
 

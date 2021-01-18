@@ -30,6 +30,9 @@ class Linear(Layer):
         else:
             return self.func(x @ self.weights + self.bias)
 
+    def get_weight(self):
+        return self.weights
+
 
 class BasicRNN(Layer):
     def __init__(self, weights, bias, h0, name):
@@ -82,6 +85,8 @@ class LSTM(Layer):
         self.h_t = self.h_0
         self.c_t = self.c_0
 
+    def get_weight(self):
+        return self.weights
 
 class GRU(Layer):
     def __init__(self, gate_weights, candidate_weights,
