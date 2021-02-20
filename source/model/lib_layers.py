@@ -1,5 +1,8 @@
 import autograd.numpy as np
+
+from solver.deepcegar_impl import Poly
 from utils import *
+from poly_utils import *
 
 
 class Layer:
@@ -17,6 +20,110 @@ class Function(Layer):
     def apply(self, x):
         return self.func(x)
 
+    def apply_poly(self, x_poly, lst_poly):
+        res = Poly()
+
+        no_neurons = len(x_poly.lw)
+
+        res.lw = np.zeros(no_neurons)
+        res.up = np.zeros(no_neurons)
+
+        res.le = np.zeros([no_neurons, no_neurons + 1])
+        res.ge = np.zeros([no_neurons, no_neurons + 1])
+
+        if self.func == relu:
+            for i in range(no_neurons):
+                if x_poly.up[i] <= 0:
+                    pass
+                elif x_poly.lw[i] >= 0:
+                    res.le[i,i] = 1
+                    res.ge[i,i] = 1
+
+                    res.lw[i] = x_poly.lw[i]
+                    res.up[i] = x_poly.up[i]
+                else:
+                    res.le[i,i] = x_poly.up[i] / (x_poly.up[i] - x_poly.lw[i])
+                    res.le[i,-1] = - x_poly.up[i] * x_poly.lw[i] / (x_poly.up[i] - x_poly.lw[i])
+
+                    lam = 0 if x_poly.up[i] <= -x_poly.lw[i] else 1
+
+                    res.ge[i,i] = lam
+                    res.lw[i] = 0 # it seems safe to set lw = 0 anyway
+                    # res.lw[i] = lam * x_poly.lw[i] # notice: mnist_relu_5_10.tf
+                    res.up[i] = x_poly.up[i]
+
+        elif self.func == sigmoid:
+            res.lw = sigmoid(x_poly.lw)
+            res.up = sigmoid(x_poly.up)
+
+            for i in range(no_neurons):
+                if x_poly.lw[i] == x_poly.up[i]:
+                    res.le[i][-1] = res.lw[i]
+                    res.ge[i][-1] = res.lw[i]
+                else:
+                    if x_poly.lw[i] > 0:
+                        lam1 = (res.up[i] - res.lw[i]) / (x_poly.up[i] - x_poly.lw[i])
+                        if x_poly.up[i] <= 0:
+                            lam2 = lam1
+                        else:
+                            ll = sigmoid(x_poly.lw[i]) * (1 - sigmoid(x_poly.lw[i]))
+                            uu = sigmoid(x_poly.up[i]) * (1 - sigmoid(x_poly.up[i]))
+                            lam2 = min(ll, uu)
+                    else:
+                        ll = sigmoid(x_poly.lw[i]) * (1 - sigmoid(x_poly.lw[i]))
+                        uu = sigmoid(x_poly.up[i]) * (1 - sigmoid(x_poly.up[i]))
+                        lam1 = min(ll, uu)
+                        if x_poly.up[i] <= 0:
+                            lam2 = (res.up[i] - res.lw[i]) / (x_poly.up[i] - x_poly.lw[i])
+                        else:
+                            lam2 = lam1
+
+                    res.ge[i,i] = lam1
+                    res.ge[i,-1] = res.lw[i] - lam1 * x_poly.lw[i]
+
+                    res.le[i,i] = lam2
+                    res.le[i,-1] = res.up[i] - lam2 * x_poly.up[i]
+
+        elif self.func == tanh:
+            res.lw = tanh(x_poly.lw)
+            res.up = tanh(x_poly.up)
+
+            for i in range(no_neurons):
+                if x_poly.lw[i] == x_poly.up[i]:
+                    res.le[i][-1] = res.lw[i]
+                    res.ge[i][-1] = res.lw[i]
+                else:
+                    if x_poly.lw[i] > 0:
+                        lam1 = (res.up[i] - res.lw[i]) / (x_poly.up[i] - x_poly.lw[i])
+                        if x_poly.up[i] <= 0:
+                            lam2 = lam1
+                        else:
+                            ll = 1 - pow(tanh(x_poly.lw[i]), 2)
+                            uu = 1 - pow(tanh(x_poly.up[i]), 2)
+                            lam2 = min(ll, uu)
+                    else:
+                        ll = 1 - pow(tanh(x_poly.lw[i]), 2)
+                        uu = 1 - pow(tanh(x_poly.up[i]), 2)
+                        lam1 = min(ll, uu)
+                        if x_poly.up[i] <= 0:
+                            lam2 = (res.up[i] - res.lw[i]) / (x_poly.up[i] - x_poly.lw[i])
+                        else:
+                            lam2 = lam1
+
+                    res.ge[i,i] = lam1
+                    res.ge[i,-1] = res.lw[i] - lam1 * x_poly.lw[i]
+
+                    res.le[i,i] = lam2
+                    res.le[i,-1] = res.up[i] - lam2 * x_poly.up[i]
+
+        return res
+
+    def is_poly_exact(self):
+        if self.func == relu or self.func == sigmoid or self.func == tanh:
+            return False
+        else:
+            return True
+
 
 class Linear(Layer):
     def __init__(self, weights, bias, name):
@@ -32,6 +139,29 @@ class Linear(Layer):
 
     def get_weight(self):
         return self.weights
+
+    def apply_poly(self, x_poly, lst_poly):
+        assert self.func == None, "self.func should be None"
+
+        weights = self.weights.transpose(1, 0)
+        bias = self.bias.transpose(1, 0)
+
+        no_neurons = len(bias)
+
+        res = Poly()
+
+        res.lw = np.zeros(no_neurons)
+        res.up = np.zeros(no_neurons)
+
+        res.le = np.concatenate([weights, bias], axis=1)
+        res.ge = np.concatenate([weights, bias], axis=1)
+
+        res.back_substitute(lst_poly)
+
+        return res
+
+    def is_poly_exact(self):
+        return True
 
 
 class BasicRNN(Layer):

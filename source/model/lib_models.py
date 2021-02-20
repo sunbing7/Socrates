@@ -1,5 +1,5 @@
 import autograd.numpy as np
-import torch
+# import torch
 
 class Model:
     def __init__(self, shape, lower, upper, layers, path):
@@ -11,6 +11,7 @@ class Model:
         if layers == None and path != None:
             self.ptmodel = torch.load(path)
 
+
     def __apply_ptmodel(self, x):
         x = torch.from_numpy(x).view(self.shape.tolist())
 
@@ -20,6 +21,7 @@ class Model:
         output = output.numpy()
 
         return output
+
 
     def apply(self, x):
         if self.layers == None:
@@ -217,3 +219,18 @@ class Model:
 
         return output, lstm_cell_mean
     '''
+
+    def forward(self, x_poly, idx, lst_poly):
+        if self.layers == None:
+            # only work when layers is not None
+            raise NameError('Not support yet!')
+
+        output = x_poly # no need for recurrent yet
+
+        for i in range(len(self.layers)):
+            if i == idx:
+                layer = self.layers[i]
+                output = layer.apply_poly(output, lst_poly)
+                break
+
+        return output

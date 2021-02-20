@@ -3,7 +3,7 @@ import argparse
 import json
 import ast
 
-from parser import parse
+from json_parser import parse
 from utils import *
 
 
@@ -30,6 +30,11 @@ def add_solver(args, spec):
         solver['alpha'] = '0.05'
         solver['beta'] = '0.05'
         solver['delta'] = '0.005'
+    elif args.algorithm == 'deepcegar':
+        solver['has_ref'] = str(args.has_ref)
+        solver['max_ref'] = str(args.max_ref)
+        solver['ref_typ'] = str(args.ref_typ)
+        solver['max_sus'] = str(args.max_sus)
 
     spec['solver'] = solver
 
@@ -46,8 +51,19 @@ def main():
                         help='the threshold in sprt')
     parser.add_argument('--eps', type=float,
                         help='the distance value')
+    parser.add_argument('--has_ref', action='store_true',
+                        help='turn on/off refinement')
+    parser.add_argument('--max_ref', type=int, default=20,
+                        help='maximum times of refinement')
+    parser.add_argument('--ref_typ', type=int, default=0,
+                        help='type of refinement')
+    parser.add_argument('--max_sus', type=int, default=1,
+                        help='maximum times of finding adversarial sample')
     parser.add_argument('--dataset', type=str,
                         help='the data set for fairness experiments')
+    parser.add_argument('--num_tests', type=int, default=100,
+                        help='maximum number of tests')
+
 
     args = parser.parse_args()
 
@@ -81,7 +97,7 @@ def main():
 
     y0s = np.array(ast.literal_eval(read(pathY)))
 
-    for i in range(100):
+    for i in range(args.num_tests):
         assertion['x0'] = pathX + 'data' + str(i) + '.txt'
         x0 = np.array(ast.literal_eval(read(assertion['x0'])))
 

@@ -3,9 +3,12 @@ import argparse
 import json
 import ast
 
-from parser import parse
+from json_parser import parse
 from utils import *
 
+from solver.lib_solvers import DeepCegar
+
+import time
 
 def add_assertion(args, spec):
     assertion = dict()
@@ -26,6 +29,8 @@ def add_solver(args, spec):
         solver['alpha'] = '0.05'
         solver['beta'] = '0.05'
         solver['delta'] = '0.005'
+    elif args.algorithm == 'deepcegar':
+        solver['max_ref'] = '5'
 
     spec['solver'] = solver
 
@@ -99,6 +104,8 @@ def main():
         print('lbl_x0 = {}'.format(lbl_x0))
         print('y0 = {}\n'.format(y0s[i]))
 
+        t0 = time.time()
+
         if lbl_x0 == y0s[i]:
             update_bounds(args, model, x0, lower, upper)
             print('Run at data {}\n'.format(i))
@@ -106,6 +113,9 @@ def main():
         else:
             print('Skip at data {}'.format(i))
 
+        t1 = time.time()
+
+        print('time = {}'.format(t1 - t0))
         print('\n============================\n')
 
 
