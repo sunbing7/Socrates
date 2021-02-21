@@ -4,6 +4,7 @@ from solver.dtmc_impl import DTMCImpl
 from solver.dtmc_rnn import DTMCImpl_rnn
 from solver.verifair_impl import VeriFairimpl
 from solver.deepcegar_impl import DeepCegarImpl
+from solver.causal_impl import CausalImpl
 
 
 class Optimize():
@@ -55,3 +56,10 @@ class DeepCegar():
     def solve(self, model, assertion, display=None):
         impl = DeepCegarImpl(self.has_ref, self.max_ref, self.ref_typ, self.max_sus)
         return impl.solve(model, assertion, display)
+
+class Causal():
+    def __init__(self):
+        pass
+    def solve(self, model, assertion, display=None):
+        impl = CausalImpl()
+        impl.solve(model, assertion, display)

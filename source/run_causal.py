@@ -7,10 +7,6 @@ from json_parser import parse
 from utils import *
 
 
-import sys
-sys.path.append("/Users/bing.sun/workspace/Fairness/Socrates/Socrates_git")
-
-
 def add_assertion(args, spec):
     assertion = dict()
 
@@ -78,37 +74,6 @@ def main():
 
     solver.solve(model, assertion)
     print('\n============================\n')
-    '''
 
-    #test accuracy
-    ori_acc = 0
-    fixed_acc = 0
-    for i in range(32000):
-        assertion['x0'] = pathX + 'data' + str(i) + '.txt'
-        x0 = np.array(ast.literal_eval(read(assertion['x0'])))
-        x0_ = x0.copy()
-        x0_[4] = 0
-        #x0_[10] = 0
-        #x0_[2] = 0
-
-
-        y = np.argmax(model.apply(x0), axis=1)[0]
-
-        #y_, layer_op = model.apply_intermediate(x0)
-        #y_ = np.argmax(y_, axis=1)[0]
-        y_ = np.argmax(model.apply(x0_), axis=1)[0]
-
-        if y != y0s[i]:
-            ori_acc = ori_acc + 1
-
-        if y_ != y0s[i]:
-            fixed_acc = fixed_acc + 1
-
-
-    print("Accuracy of ori network: %fs\n" % ((32000 - ori_acc) / 320))
-    print("Accuracy of fxied network: %fs\n" % ((32000 - fixed_acc) / 320))
-
-    print('\n============================\n')
-    '''
 if __name__ == '__main__':
     main()
